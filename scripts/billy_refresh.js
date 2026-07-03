@@ -54,7 +54,9 @@ async function main(){
   const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const cut = new Date(today0); cut.setMonth(cut.getMonth() - MONTHS);
   const cutISO = cut.toISOString().slice(0,10);
-  const inv = data.invoices.filter(i => i.entryDate < cutISO);
+  // this-year-only: entryDate on/after Jan 1 of the current year (override with FROM_DATE=YYYY-MM-DD)
+  const fromDate = process.env.FROM_DATE || `${today0.getFullYear()}-01-01`;
+  const inv = data.invoices.filter(i => i.entryDate >= fromDate && i.entryDate < cutISO);
 
   const byC = {};
   inv.forEach(i => { (byC[i.contactId] = byC[i.contactId] || []).push(i); });
