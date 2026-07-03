@@ -34,6 +34,14 @@ jobs:
           APP_SECRET: ${{ secrets.APP_SECRET }}
         run: node scripts/billy_refresh.js
 
+      - name: Synk kontakt-maps til Worker (for auto-hold ved svar)
+        env:
+          BILLY_TOKEN: ${{ secrets.BILLY_TOKEN }}
+          BILLY_ORG_ID: ${{ secrets.BILLY_ORG_ID }}
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+        run: node scripts/push_maps.js
+
       - name: Commit og push
         run: |
           git config user.name "github-actions[bot]"

@@ -44,6 +44,21 @@ export default {
       return j({ ok: true, matched: !!contactId }, 200, cors);
     }
 
+    // --- inbound EMAIL reply (Gmail Apps Script webhook) -> auto-hold. Authed by ?token= ---
+    if (path === "/email-inbound" && req.method === "POST") {
+      if (url.searchParams.get("token") !== env.EMAIL_WEBHOOK_TOKEN) return j({ error: "bad token" }, 401, cors);
+      const b = await req.json().catch(() => ({}));
+      const from = String(b.from || "");
+      const email = (from.match(/[\w.+-]+@[\w.-]+/) || [""])[0].toLowerCase();
+      const emailmap = (await env.RYKKER.get("emailmap", "json")) || {};
+      const contactId = emailmap[email];
+      const inbox = (await env.RYKKER.get("inbox", "json")) || [];
+      inbox.unshift({ ch: "email", from, email, subject: b.subject || "", text: (b.text || "").slice(0, 500), contactId: contactId || null, ts: Date.now() });
+      await env.RYKKER.put("inbox", JSON.stringify(inbox.slice(0, 200)));
+      if (contactId) await hold(env, contactId, "email-svar", { text: (b.text || "").slice(0, 300), from });
+      return j({ ok: true, matched: !!contactId }, 200, cors);
+    }
+
     // --- everything else needs the app secret ---
     if ((req.headers.get("Authorization") || "") !== "Bearer " + env.APP_SECRET)
       return j({ error: "unauthorized" }, 401, cors);
@@ -62,11 +77,12 @@ export default {
       const h = await getHolds(env); delete h[contactId]; await putHolds(env, h);
       return j({ ok: true, holds: h }, 200, cors);
     }
-    // keep phone->contact map fresh (posted by the app so SMS replies can be matched)
-    if (path === "/phonemap" && req.method === "POST") {
-      const { map } = await req.json();
-      await env.RYKKER.put("phonemap", JSON.stringify(map || {}));
-      return j({ ok: true, n: Object.keys(map || {}).length }, 200, cors);
+    // sync phone->contact and email->contact maps (posted by the daily Action) for reply matching
+    if (path === "/maps" && req.method === "POST") {
+      const { phonemap, emailmap } = await req.json();
+      if (phonemap) await env.RYKKER.put("phonemap", JSON.stringify(phonemap));
+      if (emailmap) await env.RYKKER.put("emailmap", JSON.stringify(emailmap));
+      return j({ ok: true, phones: Object.keys(phonemap || {}).length, emails: Object.keys(emailmap || {}).length }, 200, cors);
     }
     // --- send approved rykkere via Billy (skips held; test=true routes to TEST_CONTACT) ---
     if (path === "/send" && req.method === "POST") {
@@ -84,7 +100,7 @@ export default {
           ...(it.contactPersonId ? { contactPersonId: it.contactPersonId } : {}),
           flatFee: it.flatFee || 0, percentageFee: 0, feeCurrencyId: "DKK",
           sendEmail: it.sendEmail !== false,
-          emailSubject: it.subject, emailBody: it.body, message: it.body,
+          emailSubject: it.subject, emailBody: it.body, message: it.message || it.body,
           associations: (it.invoiceIds || []).map((id) => ({ invoiceId: id })),
         };
         try {
