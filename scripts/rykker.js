@@ -98,7 +98,8 @@ async function computeDue(){
     const daysOver=dayDiff(today,cycleStart);
     const rec={ cid, name:nbsp(c.name)||"(ukendt)", phone:phone(c.phone), n:items.length,
                 total:items.reduce((s,iv)=>s+iv.balance,0), days:daysOver, last,
-                invs:items.map(iv=>iv.invoiceNo), contactPersonId:c.attContactPersonId||null };
+                invs:items.map(iv=>iv.invoiceNo), invoiceIds:items.map(iv=>iv.id),
+                contactPersonId:c.attContactPersonId||null };
     if(nxt===0){ if(daysOver>=GRACE) buckets[0].push(rec); else waiting++; }
     else if(last && dayDiff(today,last)<GAP) waiting++;
     else buckets[nxt].push(rec);

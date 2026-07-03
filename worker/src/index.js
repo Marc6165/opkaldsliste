@@ -70,21 +70,22 @@ export default {
     }
     // --- send approved rykkere via Billy (skips held; test=true routes to TEST_CONTACT) ---
     if (path === "/send" && req.method === "POST") {
-      const { items, test } = await req.json();
+      const { items } = await req.json();
       const holds = await getHolds(env);
-      const liveEnabled = env.LIVE === "1";      // master switch — off until we've validated
+      const liveEnabled = env.LIVE === "1";      // master switch — off until validated
       const results = [];
       for (const it of items || []) {
         if (holds[it.contactId]) { results.push({ contactId: it.contactId, skipped: "held" }); continue; }
-        const useTest = !!test || !liveEnabled;  // until LIVE=1, force everything to the test recipient, no fee
-        if (useTest && !env.TEST_CONTACT) { results.push({ contactId: it.contactId, skipped: "no-test-contact" }); continue; }
+        // safety: while LIVE is off, only the test contact may receive anything
+        if (!liveEnabled && it.contactId !== env.TEST_CONTACT) { results.push({ contactId: it.contactId, skipped: "live-off" }); continue; }
         const payload = {
           organizationId: env.BILLY_ORG_ID,
-          contactId: useTest ? env.TEST_CONTACT : it.contactId,
-          flatFee: useTest ? 0 : (it.flatFee || 0),
-          percentageFee: 0, feeCurrencyId: "DKK",
-          sendEmail: true, emailSubject: it.subject, emailBody: it.body, message: it.body,
-          ...(it.contactPersonId && !useTest ? { contactPersonId: it.contactPersonId } : {}),
+          contactId: it.contactId,
+          ...(it.contactPersonId ? { contactPersonId: it.contactPersonId } : {}),
+          flatFee: it.flatFee || 0, percentageFee: 0, feeCurrencyId: "DKK",
+          sendEmail: it.sendEmail !== false,
+          emailSubject: it.subject, emailBody: it.body, message: it.body,
+          associations: (it.invoiceIds || []).map((id) => ({ invoiceId: id })),
         };
         try {
           const r = await fetch("https://api.billysbilling.com/v2/invoiceReminders", {
@@ -92,10 +93,10 @@ export default {
             headers: { "X-Access-Token": env.BILLY_TOKEN, "Content-Type": "application/json" },
             body: JSON.stringify({ invoiceReminder: payload }),
           });
-          results.push({ contactId: it.contactId, status: r.status, ok: r.ok, mode: useTest ? "test" : "live" });
-          if (r.ok && !useTest) {
+          results.push({ contactId: it.contactId, status: r.status, ok: r.ok, mode: liveEnabled ? "live" : "test" });
+          if (r.ok) {
             const log = (await env.RYKKER.get("sent", "json")) || [];
-            log.unshift({ contactId: it.contactId, step: it.step, ts: Date.now() });
+            log.unshift({ contactId: it.contactId, step: it.step, fee: it.flatFee || 0, ts: Date.now() });
             await env.RYKKER.put("sent", JSON.stringify(log.slice(0, 1000)));
           }
         } catch (e) { results.push({ contactId: it.contactId, error: String(e).slice(0, 120) }); }
