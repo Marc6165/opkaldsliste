@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#F7F8FA">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Opkaldsliste">
+<meta name="robots" content="noindex, nofollow">
+<title>Opkaldsliste — Sands Vinduespudsning</title>
+<style>
+:root{
+  --bg:#F7F8FA; --card:#FFFFFF; --ink:#111827; --muted:#6B7280; --hair:#E5E7EB;
+  --blue:#2E5CFF; --blue-d:#1E44D6; --blue-bg:#EAF0FF;
+  --green:#16A34A; --green-d:#12833C;
+  --red:#D92D20; --red-bg:#FDECEC; --done:#9AA2AE;
+}
+*{box-sizing:border-box}
+html,body{touch-action:manipulation}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  line-height:1.5;-webkit-font-smoothing:antialiased;letter-spacing:-.005em;overflow-x:hidden}
+.wrap{max-width:600px;margin:0 auto;padding:calc(24px + env(safe-area-inset-top)) 18px 100px}
+button,a,input,label,.act,.done,.big-btn{touch-action:manipulation}
+
+/* lock screen */
+.lock{min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px}
+.lockcard{width:100%;max-width:380px;text-align:center}
+.lockcard .icon{font-size:34px}
+.lockcard h1{font-size:22px;font-weight:700;letter-spacing:-.02em;margin:12px 0 4px}
+.lockcard p{color:var(--muted);font-size:14px;margin:0 0 20px}
+.lockform{display:flex;flex-direction:column;gap:10px}
+.pwd{width:100%;min-height:52px;border:1px solid var(--hair);border-radius:14px;padding:0 16px;
+  font-size:16px;font-family:inherit;background:var(--card);color:var(--ink);text-align:center}
+.pwd::placeholder{color:var(--muted)}
+.pwd:focus{outline:2px solid var(--blue);outline-offset:1px;border-color:var(--blue)}
+.unlock{min-height:52px;border:none;border-radius:14px;background:var(--blue);color:#fff;
+  font-size:16px;font-weight:700;font-family:inherit;cursor:pointer}
+.unlock:disabled{opacity:.6}
+.remember{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted);
+  font-size:14px;font-weight:500;cursor:pointer;padding:4px}
+.remember input{width:18px;height:18px;accent-color:var(--blue)}
+.lockerr{color:var(--red);font-size:14px;font-weight:600;min-height:20px}
+.locknote{color:var(--muted);font-size:12px;margin-top:14px;line-height:1.5}
+
+.mast{margin-bottom:6px}
+.eyebrow{font-size:12px;color:var(--muted);font-weight:600}
+.mast h1{font-weight:700;font-size:clamp(23px,6vw,30px);margin:4px 0 10px;line-height:1.15;
+  letter-spacing:-.02em;text-wrap:balance}
+.mast p{margin:0;color:var(--muted);font-size:14.5px;line-height:1.55;max-width:52ch}
+.mast p b{color:var(--ink);font-weight:600}
+
+.bar{position:sticky;top:0;z-index:10;background:rgba(247,248,250,.92);backdrop-filter:blur(8px);
+  padding:16px 0 14px;margin:20px 0 22px;border-bottom:1px solid var(--hair)}
+.tot{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.tot .lbl{font-size:13px;color:var(--muted);font-weight:600}
+.tot .num{font-size:21px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.track{height:6px;background:var(--hair);border-radius:99px;overflow:hidden;margin:12px 0 14px}
+.track>i{display:block;height:100%;width:0;background:var(--blue);transition:width .4s ease;border-radius:99px}
+.barrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pt{font-size:13px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+.spacer{flex:1}
+.btn{border:1px solid var(--hair);background:var(--card);color:var(--muted);border-radius:10px;
+  padding:8px 13px;font-size:13px;font-weight:600;cursor:pointer;min-height:38px}
+.btn:hover{color:var(--ink);border-color:var(--muted)}
+.btn.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:6px}
+
+.card{background:var(--card);border:1px solid var(--hair);border-radius:18px;padding:20px 18px;margin-bottom:14px;
+  box-shadow:0 1px 2px rgba(17,24,39,.04);transition:opacity .2s}
+.top{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:6px 13px}
+.rank{width:28px;height:28px;border-radius:50%;background:var(--blue-bg);color:var(--blue);
+  font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums;margin-top:2px}
+.who{min-width:0}
+.who h2{margin:0;font-size:19px;font-weight:700;line-height:1.2;letter-spacing:-.02em;overflow-wrap:anywhere}
+.loc{font-size:13.5px;color:var(--muted);margin-top:3px}
+.pricebox{text-align:right}
+.pricebox .amt{font-size:23px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1;
+  letter-spacing:-.03em;white-space:nowrap}
+.pricebox .cur{font-size:14px;font-weight:600;color:var(--muted)}
+.pricebox .sub{font-size:12px;color:var(--muted);margin-top:4px}
+
+.actions{display:flex;gap:10px;margin:20px 0 6px}
+.act{flex:1;display:flex;align-items:center;justify-content:center;gap:9px;min-height:56px;
+  border-radius:14px;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer;border:none;
+  font-family:inherit;letter-spacing:-.01em;text-decoration:none}
+.act:active{transform:translateY(1px)}
+.act svg{width:20px;height:20px;fill:currentColor;flex:0 0 auto}
+.act .cn{display:flex;flex-direction:column;line-height:1.1;text-align:left}
+.act small{display:block;font-size:11px;font-weight:600;opacity:.85;margin-bottom:1px}
+.act.call{flex:1.4;background:var(--blue);color:#fff;font-size:18px}
+.act.sms{background:var(--blue-bg);color:var(--blue);font-size:16px}
+.nocall{display:flex;align-items:center;justify-content:center;gap:8px;margin:20px 0 6px;min-height:50px;
+  border-radius:14px;background:var(--red-bg);color:var(--red);font-size:14.5px;font-weight:600}
+
+.lines{list-style:none;margin:18px 0 0;padding:0}
+.line{padding:14px 0;border-top:1px solid var(--hair)}
+.lrow{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.fak{font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums;font-size:13.5px}
+.lamt{font-weight:700;font-variant-numeric:tabular-nums;font-size:15px;white-space:nowrap}
+.ldesc{font-size:14.5px;color:var(--ink);margin-top:3px}
+.lmeta{font-size:12.5px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
+.banner{margin-top:10px;padding:11px 13px;border-radius:11px;font-size:14px;font-weight:600;line-height:1.4;
+  display:flex;gap:9px;align-items:flex-start;background:var(--red-bg);color:var(--red)}
+.banner.fee{background:#F3F4F6;color:var(--muted);font-weight:500}
+.banner .ic{flex:0 0 auto}
+
+.done{width:100%;margin-top:18px;min-height:48px;border-radius:14px;border:1px solid var(--hair);
+  background:var(--card);color:var(--muted);font-size:15px;font-weight:600;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:9px}
+.done:hover{color:var(--ink);border-color:var(--muted)}
+.done .chk{width:20px;height:20px;border:1.5px solid var(--muted);border-radius:6px;flex:0 0 auto;position:relative}
+.card.is-done{opacity:.55}
+.card.is-done .done{background:var(--green);color:#fff;border-color:var(--green)}
+.card.is-done .done .chk{background:#fff;border-color:#fff}
+.card.is-done .done .chk::after{content:"";position:absolute;left:6px;top:2px;width:5px;height:10px;
+  border:solid var(--green);border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
+.card.is-done .who h2{text-decoration:line-through;color:var(--done)}
+.card.is-done .done .txt::before{content:"Kontaktet"}
+.done .txt::before{content:"Markér som kontaktet"}
+
+body.hide-done .card.is-done{display:none}
+footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-height:1.6}
+
+.overlay{position:fixed;inset:0;background:rgba(17,24,39,.42);z-index:50;display:flex;
+  align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.overlay.open{opacity:1;pointer-events:auto}
+.sheet{background:var(--card);width:100%;max-width:520px;border-radius:22px 22px 0 0;
+  padding:22px 20px calc(22px + env(safe-area-inset-bottom));transform:translateY(20px);transition:transform .22s}
+.overlay.open .sheet{transform:none}
+@media(min-width:560px){.overlay{align-items:center}.sheet{border-radius:22px;margin:0 16px}}
+.sheet h3{margin:0 0 4px;font-size:18px;font-weight:700;letter-spacing:-.02em}
+.sheet .subtle{margin:0 0 16px;font-size:13.5px;color:var(--muted)}
+.sheet .subtle b{color:var(--ink)}
+.msgbox{width:100%;border:1px solid var(--hair);border-radius:14px;padding:14px;font-size:14px;
+  line-height:1.5;font-family:inherit;color:var(--ink);background:#FBFBFC;resize:none;margin-bottom:14px;
+  white-space:pre-wrap}
+.sheet-actions{display:flex;flex-direction:column;gap:10px}
+.big-btn{min-height:52px;border-radius:14px;font-size:16px;font-weight:700;font-family:inherit;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;border:none}
+.big-btn.primary{background:var(--blue);color:#fff}
+.big-btn.ghost{background:var(--card);color:var(--ink);border:1px solid var(--hair)}
+.big-btn.ghost:hover{border-color:var(--muted)}
+.sheet-close{background:none;border:none;color:var(--muted);font-size:14px;font-weight:600;
+  font-family:inherit;cursor:pointer;padding:12px;width:100%;margin-top:2px}
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:var(--ink);color:#fff;
+  padding:12px 20px;border-radius:99px;font-size:14px;font-weight:600;z-index:60;opacity:0;
+  pointer-events:none;transition:opacity .2s,transform .2s}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="lock" id="lock">
+  <div class="lockcard">
+    <div class="icon">🔒</div>
+    <h1>Opkaldsliste</h1>
+    <p>Skriv adgangskoden for at åbne listen.</p>
+    <form class="lockform" id="lockform">
+      <input class="pwd" id="pwd" type="password" inputmode="text" autocomplete="current-password"
+             placeholder="Adgangskode" aria-label="Adgangskode">
+      <button class="unlock" id="unlock" type="submit">Lås op</button>
+      <label class="remember"><input type="checkbox" id="remember" checked> Husk mig på denne telefon</label>
+      <div class="lockerr" id="lockerr"></div>
+    </form>
+    <div class="locknote">Fortrolig kundeliste for Sands Vinduespudsning.<br>Indholdet er krypteret og kan kun læses med koden.</div>
+  </div>
+</div>
+
+<div class="wrap" id="app" hidden>
+  <header class="mast">
+    <div class="eyebrow">Sands Vinduespudsning</div>
+    <h1>Ring til kunderne</h1>
+    <p>Start øverst, hvor der er mest at hente. Beløbet er <b>det kunden skal betale nu, inkl. moms</b>. Tryk <b>Ring</b> for at ringe op, eller <b>SMS</b> for en færdig besked. Tryk <b>Markér som kontaktet</b> bagefter.</p>
+  </header>
+
+  <div class="bar">
+    <div class="tot"><span class="lbl">Tilbage at hente</span><span class="num" id="remain">–</span></div>
+    <div class="track"><i id="fill"></i></div>
+    <div class="barrow">
+      <span class="pt" id="pt">–</span>
+      <span class="spacer"></span>
+      <button class="btn" id="hidebtn">Skjul færdige</button>
+      <button class="btn" id="resetbtn">Nulstil</button>
+      <button class="btn" id="lockbtn">Lås</button>
+    </div>
+  </div>
+
+  <div id="list"></div>
+
+  <footer id="foot"></footer>
+</div>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="sheet" role="dialog" aria-modal="true">
+    <h3 id="shTitle"></h3>
+    <p class="subtle" id="shSub"></p>
+    <div id="shContent"></div>
+    <div class="sheet-actions" id="shActions"></div>
+    <button class="sheet-close" id="shClose">Luk</button>
+  </div>
+</div>
+<div class="toast" id="toast">Kopieret</div>
+
+<script>
+/* ---- encrypted payload (produced at build time) ---- */
+const ENC={salt:"__SALT__",iv:"__IV__",ct:"__CT__",iter:__ITER__};
+const PWKEY="sands-opkald-pw-v1";
+const b64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+
+async function decrypt(password){
+  const enc=new TextEncoder();
+  const base=await crypto.subtle.importKey("raw",enc.encode(password),"PBKDF2",false,["deriveKey"]);
+  const key=await crypto.subtle.deriveKey(
+    {name:"PBKDF2",salt:b64(ENC.salt),iterations:ENC.iter,hash:"SHA-256"},
+    base,{name:"AES-GCM",length:256},false,["decrypt"]);
+  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64(ENC.iv)},key,b64(ENC.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+const lockform=document.getElementById("lockform");
+const pwd=document.getElementById("pwd");
+const unlockBtn=document.getElementById("unlock");
+const lockerr=document.getElementById("lockerr");
+const remember=document.getElementById("remember");
+
+async function unlockWith(password,fromStorage){
+  const data=await decrypt(password); // throws on wrong password
+  if(!fromStorage && remember.checked){ try{localStorage.setItem(PWKEY,password)}catch(e){} }
+  const lock=document.getElementById("lock"); if(lock) lock.remove();
+  initApp(data);
+}
+
+lockform.addEventListener("submit",async e=>{
+  e.preventDefault();lockerr.textContent="";unlockBtn.disabled=true;unlockBtn.textContent="Låser op…";
+  try{ await unlockWith(pwd.value,false); }
+  catch(err){
+    lockerr.textContent="Forkert adgangskode. Prøv igen.";
+    unlockBtn.disabled=false;unlockBtn.textContent="Lås op";pwd.select();
+  }
+});
+
+/* auto-unlock if this phone has remembered the code */
+(async()=>{
+  const saved=(()=>{try{return localStorage.getItem(PWKEY)}catch(e){return null}})();
+  if(saved){ try{ await unlockWith(saved,true); }catch(e){ try{localStorage.removeItem(PWKEY)}catch(_){} } }
+})();
+
+/* ---- app (runs after unlock) ---- */
+function initApp(data){
+  const app=document.getElementById("app");
+  document.getElementById("list").innerHTML=data.cardsHTML;
+  document.getElementById("foot").innerHTML="Hentet fra Billy den "+data.stamp+" · "+data.nCust+" kunder · "+data.nInv+" fakturaer · beløb = restbeløb inkl. moms.<br>Fortroligt · kun til internt brug.";
+  app.hidden=false;
+
+  const KEY="sands-opkald-secure-v1";
+  const cards=[...document.querySelectorAll("#list .card")];
+  const total=cards.reduce((s,c)=>s+parseFloat(c.dataset.bal),0);
+  const f=x=>x.toLocaleString("da-DK",{minimumFractionDigits:2,maximumFractionDigits:2});
+  const load=()=>{try{return JSON.parse(localStorage.getItem(KEY))||{}}catch(e){return{}}};
+  const save=s=>{try{localStorage.setItem(KEY,JSON.stringify(s))}catch(e){}};
+  let state=load();
+  function render(){
+    let done=0,bd=0;
+    cards.forEach(c=>{const on=!!state[c.id];c.classList.toggle("is-done",on);
+      c.querySelector(".done").setAttribute("aria-pressed",on);
+      if(on){done++;bd+=parseFloat(c.dataset.bal)}});
+    document.getElementById("fill").style.width=(cards.length?Math.round(done/cards.length*100):0)+"%";
+    document.getElementById("pt").textContent=done+" / "+cards.length+" kontaktet";
+    document.getElementById("remain").textContent=f(total-bd)+" kr";
+  }
+  cards.forEach(c=>{c.querySelector(".done").addEventListener("click",()=>{
+    if(state[c.id])delete state[c.id];else state[c.id]=1;save(state);render();});});
+  document.getElementById("hidebtn").addEventListener("click",e=>{
+    document.body.classList.toggle("hide-done");e.target.classList.toggle("on");
+    e.target.textContent=document.body.classList.contains("hide-done")?"Vis alle":"Skjul færdige";});
+  document.getElementById("resetbtn").addEventListener("click",()=>{
+    if(confirm("Nulstil alle flueben?")){state={};save(state);render();}});
+  document.getElementById("lockbtn").addEventListener("click",()=>{
+    if(confirm("Lås appen og glem koden på denne telefon?")){
+      try{localStorage.removeItem(PWKEY)}catch(e){} location.reload();}});
+
+  let toastT;
+  function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");
+    clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),1600);}
+  function copyText(text){
+    const ok=()=>toast("Kopieret ✓");
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(ok,fb);}else fb();
+    function fb(){const t=document.createElement("textarea");t.value=text;t.style.position="fixed";t.style.opacity="0";
+      document.body.appendChild(t);t.focus();t.select();try{document.execCommand("copy");ok();}catch(e){toast("Kunne ikke kopiere");}t.remove();}
+  }
+  const overlay=document.getElementById("overlay");
+  function openSheet(){overlay.hidden=false;requestAnimationFrame(()=>overlay.classList.add("open"));}
+  function closeSheet(){overlay.classList.remove("open");setTimeout(()=>overlay.hidden=true,200);}
+  document.getElementById("shClose").addEventListener("click",closeSheet);
+  overlay.addEventListener("click",e=>{if(e.target===overlay)closeSheet();});
+  document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!overlay.hidden)closeSheet();});
+  document.querySelectorAll("#list .act.sms").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const phone=btn.dataset.phone,disp=btn.dataset.disp,name=btn.dataset.name||"",msg=btn.dataset.msg;
+      document.getElementById("shTitle").textContent="SMS til "+name;
+      document.getElementById("shSub").innerHTML="Sendes til <b>"+disp+"</b>. Tryk <b>Åbn SMS-app</b> — beskeden er skrevet på forhånd.";
+      const content=document.getElementById("shContent");
+      content.innerHTML='<textarea class="msgbox" rows="11" readonly></textarea>';
+      content.querySelector("textarea").value=msg;
+      const actions=document.getElementById("shActions");actions.innerHTML="";
+      const open=document.createElement("a");open.className="big-btn primary";
+      open.href="sms:"+phone+"?&body="+encodeURIComponent(msg);
+      open.textContent="💬 Åbn SMS-app";open.addEventListener("click",()=>setTimeout(closeSheet,400));
+      const cp=document.createElement("button");cp.className="big-btn ghost";
+      cp.textContent="Kopiér besked";cp.onclick=()=>copyText(msg);
+      actions.append(open,cp);
+      openSheet();
+    });
+  });
+  render();
+}
+</script>
+</body>
+</html>
