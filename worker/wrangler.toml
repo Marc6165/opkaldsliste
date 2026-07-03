@@ -1,0 +1,18 @@
+name = "sands-rykker"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# KV for holds / phonemap / inbox — replace id after you create the namespace
+[[kv_namespaces]]
+binding = "RYKKER"
+id = "REPLACE_WITH_KV_ID"
+
+[vars]
+BILLY_ORG_ID = "QDuUgYK5SmyeKHHdSzyqCQ"
+APP_ORIGIN = "https://marc6165.github.io"
+# TEST_CONTACT = "your-own-billy-contactId"   # set before the first live test send
+
+# Secrets (do NOT put here — set with `wrangler secret put` or in the dashboard):
+#   BILLY_TOKEN         your Billy API token
+#   APP_SECRET          shared secret the app sends as `Authorization: Bearer <APP_SECRET>`
+#   SMS_WEBHOOK_TOKEN   random token GatewayAPI includes in the webhook URL (?token=...)
