@@ -5,7 +5,7 @@ compatibility_date = "2024-11-01"
 # KV for holds / phonemap / inbox — replace id after you create the namespace
 [[kv_namespaces]]
 binding = "RYKKER"
-id = "REPLACE_WITH_KV_ID"
+id = "c142f79c9d264cde8dc1b971de87faa3"
 
 [vars]
 BILLY_ORG_ID = "QDuUgYK5SmyeKHHdSzyqCQ"

@@ -72,15 +72,19 @@ export default {
     if (path === "/send" && req.method === "POST") {
       const { items, test } = await req.json();
       const holds = await getHolds(env);
+      const liveEnabled = env.LIVE === "1";      // master switch — off until we've validated
       const results = [];
       for (const it of items || []) {
         if (holds[it.contactId]) { results.push({ contactId: it.contactId, skipped: "held" }); continue; }
+        const useTest = !!test || !liveEnabled;  // until LIVE=1, force everything to the test recipient, no fee
+        if (useTest && !env.TEST_CONTACT) { results.push({ contactId: it.contactId, skipped: "no-test-contact" }); continue; }
         const payload = {
           organizationId: env.BILLY_ORG_ID,
-          contactId: (test && env.TEST_CONTACT) ? env.TEST_CONTACT : it.contactId,
-          flatFee: it.flatFee || 0, percentageFee: 0, feeCurrencyId: "DKK",
+          contactId: useTest ? env.TEST_CONTACT : it.contactId,
+          flatFee: useTest ? 0 : (it.flatFee || 0),
+          percentageFee: 0, feeCurrencyId: "DKK",
           sendEmail: true, emailSubject: it.subject, emailBody: it.body, message: it.body,
-          ...(it.contactPersonId ? { contactPersonId: it.contactPersonId } : {}),
+          ...(it.contactPersonId && !useTest ? { contactPersonId: it.contactPersonId } : {}),
         };
         try {
           const r = await fetch("https://api.billysbilling.com/v2/invoiceReminders", {
@@ -88,8 +92,8 @@ export default {
             headers: { "X-Access-Token": env.BILLY_TOKEN, "Content-Type": "application/json" },
             body: JSON.stringify({ invoiceReminder: payload }),
           });
-          results.push({ contactId: it.contactId, status: r.status, ok: r.ok });
-          if (r.ok && !test) {
+          results.push({ contactId: it.contactId, status: r.status, ok: r.ok, mode: useTest ? "test" : "live" });
+          if (r.ok && !useTest) {
             const log = (await env.RYKKER.get("sent", "json")) || [];
             log.unshift({ contactId: it.contactId, step: it.step, ts: Date.now() });
             await env.RYKKER.put("sent", JSON.stringify(log.slice(0, 1000)));
