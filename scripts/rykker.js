@@ -156,9 +156,19 @@ async function buildRykker(){
       +`<span class="ry-sub">#${f.iv.invoiceNo} · ${esc(f.why)} · ${f.x.entryDate}</span></div><div class="ry-amt">${dk(f.iv.balance)} kr</div></div>`; }
     html+=`</div>`;
   }
-  const rykkerItems = [].concat(buckets[0], buckets[1], buckets[2], buckets[3]).map(r => ({
+  // which due customers actually have an email (email rykkere can only reach those)
+  const dueRecs = [].concat(buckets[0], buckets[1], buckets[2], buckets[3]);
+  const dueCids = [...new Set(dueRecs.map(r => r.cid))];
+  const emailCids = new Set();
+  for (let i = 0; i < dueCids.length; i += 6) {
+    await Promise.all(dueCids.slice(i, i + 6).map(async cid => {
+      try { const r = await api(`/v2/contactPersons?contactId=${cid}`); if ((r.contactPersons || []).some(p => p.email)) emailCids.add(cid); } catch (e) {}
+    }));
+  }
+  const rykkerItems = dueRecs.map(r => ({
     cid:r.cid, contactPersonId:r.contactPersonId, invoiceIds:r.invoiceIds, step:r.step, flatFee:r.flatFee,
     subject:r.subject, body:r.body, message:r.message, name:r.name, phone:r.phone, total:r.total, days:r.days, invs:r.invs,
+    hasEmail: emailCids.has(r.cid),
   }));
   return { rykkerHTML: html, rykkerItems,
            rykkerSummary: { due:dueCount, fee:feeTotal, mapSize:brain.mapSize, flagged:exc.flagged.length } };
