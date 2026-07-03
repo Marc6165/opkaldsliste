@@ -30,6 +30,8 @@ jobs:
           UNLOCK_PASSWORD: ${{ secrets.UNLOCK_PASSWORD }}
           MOBILEPAY: ${{ secrets.MOBILEPAY }}
           AGE_MONTHS: '2'
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
         run: node scripts/billy_refresh.js
 
       - name: Commit og push

@@ -113,7 +113,8 @@ async function main(){
   catch (e) { console.error('rykker preview skipped:', e.message); }
 
   const payload = JSON.stringify({ cardsHTML: cards, nCust: custs.length, nInv: inv.length, grandBal: dk(grandBal), stamp,
-                                   rykkerHTML: rk.rykkerHTML, rykkerSummary: rk.rykkerSummary });
+                                   rykkerHTML: rk.rykkerHTML, rykkerSummary: rk.rykkerSummary, rykkerItems: rk.rykkerItems || [],
+                                   workerUrl: process.env.WORKER_URL || '', appSecret: process.env.APP_SECRET || '' });
 
   // encrypt (AES-256-GCM, PBKDF2-SHA256) — WebCrypto compatible
   const salt = crypto.randomBytes(16), iv = crypto.randomBytes(12);

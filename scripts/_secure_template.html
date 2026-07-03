@@ -180,6 +180,18 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
 .ry-name{display:block;font-weight:700;font-size:15px;letter-spacing:-.01em;overflow-wrap:anywhere}
 .ry-sub{display:block;font-size:12.5px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
 .ry-amt{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:15px}
+.ry-row{align-items:flex-start}
+.ry-right{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex:0 0 auto}
+.ry-actions{display:flex;gap:6px}
+.ry-btn{border:1px solid var(--hair);background:var(--card);color:var(--ink);border-radius:8px;
+  padding:6px 13px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;touch-action:manipulation}
+.ry-btn.send{background:var(--blue);color:#fff;border-color:var(--blue)}
+.ry-btn.hold:hover{border-color:var(--muted)}
+.ry-btn:active{transform:translateY(1px)}
+.ry-stat{font-size:11.5px;color:var(--muted);min-height:14px}
+.ry-row.ry-done{opacity:.5}
+.ry-row.ry-held{opacity:.6}
+.ry-row.ry-held .ry-name{text-decoration:line-through}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -294,7 +306,7 @@ lockform.addEventListener("submit",async e=>{
 function initApp(data){
   const app=document.getElementById("app");
   document.getElementById("list").innerHTML=data.cardsHTML;
-  document.getElementById("rykker").innerHTML=data.rykkerHTML||'<p class="intro">Ingen rykker-forhåndsvisning tilgængelig.</p>';
+  renderRykker(data);
   document.getElementById("foot").innerHTML="Hentet fra Billy den "+data.stamp+" · "+data.nCust+" kunder · "+data.nInv+" fakturaer · beløb = restbeløb inkl. moms.<br>Fortroligt · kun til internt brug.";
   app.hidden=false;
   // tabs
@@ -368,6 +380,59 @@ function initApp(data){
       openSheet();
     });
   });
+
+  // ---- Rykkere tab: interactive Approve/Hold wired to the Worker ----
+  function renderRykker(data){
+    const box=document.getElementById("rykker");
+    const items=data.rykkerItems||[], W=data.workerUrl, SEC=data.appSecret;
+    const STEPN=["Påmindelse","Rykker 1","Rykker 2","Rykker 3"];
+    const dkf=x=>Number(x).toLocaleString("da-DK",{minimumFractionDigits:2,maximumFractionDigits:2});
+    const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    if(!items.length){ box.innerHTML='<p class="intro">Ingen rykkere klar i dag. 🎉</p>'; return; }
+    const groups=[[],[],[],[]]; items.forEach(it=>groups[it.step].push(it));
+    const s=data.rykkerSummary||{};
+    let html=`<div class="ry-note">📋 Forhåndsvisning pr. ${esc(data.stamp)}. Tryk <b>Send</b> for at sende, eller <b>Hold</b> for at sætte en kunde på pause.${W?"":" <b>(backend ikke forbundet)</b>"}</div>`;
+    html+=`<div class="ry-meta">${items.length} kunder klar · ${dkf(s.fee||0)} kr i gebyrer hvis alt sendes${s.flagged?` · <span class="ry-paid">${s.flagged} muligvis betalt (udeladt)</span>`:""}</div>`;
+    const flat=[];
+    for(let st=0;st<4;st++){ const g=groups[st]; if(!g.length) continue;
+      html+=`<div class="ry-sec"><div class="ry-h s${st}">${STEPN[st]}${st>=1?" · 50 kr":""} <span class="ry-n">${g.length}</span></div>`;
+      g.forEach((it,i)=>{ const id="ry_"+st+"_"+i; flat.push({id,it});
+        html+=`<div class="ry-row" id="${id}"><div class="ry-who"><span class="ry-name">${esc(it.name)}</span>`
+          +`<span class="ry-sub">${it.phone?esc(it.phone)+" · ":""}${it.invs.length} fakt · ${it.days} dage</span></div>`
+          +`<div class="ry-right"><span class="ry-amt">${dkf(it.total)} kr</span>`
+          +`<div class="ry-actions"><button class="ry-btn send">Send</button><button class="ry-btn hold">Hold</button></div>`
+          +`<span class="ry-stat"></span></div></div>`;
+      });
+      html+=`</div>`;
+    }
+    box.innerHTML=html;
+    const call=(path,body)=>fetch(W+path,{method:"POST",headers:{"Authorization":"Bearer "+SEC,"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json());
+    flat.forEach(({id,it})=>{
+      const row=document.getElementById(id), stat=row.querySelector(".ry-stat"), holdBtn=row.querySelector(".hold");
+      row.querySelector(".send").addEventListener("click",async()=>{
+        if(!W){ stat.textContent="ingen backend"; return; }
+        stat.textContent="sender…";
+        try{ const d=await call("/send",{items:[it]}); const res=(d.results||[])[0]||{};
+          if(res.ok){ stat.textContent="sendt ✓"; row.classList.add("ry-done"); }
+          else if(res.skipped==="live-off"){ stat.textContent="LIVE fra – intet sendt"; }
+          else if(res.skipped==="held"){ stat.textContent="på hold"; }
+          else{ stat.textContent="fejl ("+(res.status||res.error||"?")+")"; }
+        }catch(e){ stat.textContent="netværksfejl"; }
+      });
+      holdBtn.addEventListener("click",async()=>{
+        if(!W) return; const held=row.classList.contains("ry-held");
+        try{ await call(held?"/release":"/hold",{contactId:it.cid,reason:"manuelt hold"});
+          row.classList.toggle("ry-held"); holdBtn.textContent=held?"Hold":"Frigiv"; stat.textContent=held?"":"på hold";
+        }catch(e){ stat.textContent="netværksfejl"; }
+      });
+    });
+    if(W) fetch(W+"/state",{headers:{"Authorization":"Bearer "+SEC}}).then(r=>r.json()).then(d=>{
+      const holds=d.holds||{};
+      flat.forEach(({id,it})=>{ if(holds[it.cid]){ const row=document.getElementById(id);
+        if(row){ row.classList.add("ry-held"); row.querySelector(".hold").textContent="Frigiv"; row.querySelector(".ry-stat").textContent="på hold"; } } });
+    }).catch(()=>{});
+  }
+
   render();
 }
 </script>

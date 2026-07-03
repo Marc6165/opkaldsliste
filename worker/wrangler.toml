@@ -9,8 +9,8 @@ id = "c142f79c9d264cde8dc1b971de87faa3"
 
 [vars]
 BILLY_ORG_ID = "QDuUgYK5SmyeKHHdSzyqCQ"
-APP_ORIGIN = "https://marc6165.github.io"
-# TEST_CONTACT = "your-own-billy-contactId"   # set before the first live test send
+APP_ORIGIN = "*"
+TEST_CONTACT = "dBrJuWxYRG28q95fScFkug"   # throwaway 'TEST – Marcus' contact (Marcussand2@gmail.com)
 
 # Secrets (do NOT put here — set with `wrangler secret put` or in the dashboard):
 #   BILLY_TOKEN         your Billy API token

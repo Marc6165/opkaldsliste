@@ -4,6 +4,15 @@ const ORG = process.env.BILLY_ORG_ID;
 const TOKEN = process.env.BILLY_TOKEN;
 const BANK_ACCOUNT = process.env.BANK_ACCOUNT_ID || "19BAWJlST0C2wW4nASsalg"; // Frørup Andelskasse
 const GAP = 10, GRACE = 7;
+const MOBILEPAY = process.env.MOBILEPAY || "22330482";
+function rykkerText(step, total){
+  const kr = (Math.abs(total)).toFixed(2).replace(".",",").replace(/\B(?=(\d{3})+(?!\d))/g,".");
+  const mp = `Betal via betalingslinket i mailen eller på MobilePay til ${MOBILEPAY} (husk fakturanummer i kommentaren).`;
+  if(step===0) return { subject:"Venlig påmindelse om betaling – Sands Vinduespudsning",
+    body:`Hej,\n\nVi kan se, at der står ${kr} kr til betaling hos Sands Vinduespudsning (se vedhæftede).\n${mp}\n\nHar du allerede betalt, så se venligst bort fra denne besked.\n\nMange tak\nSands Vinduespudsning` };
+  return { subject:`Rykker ${step} for manglende betaling – Sands Vinduespudsning`,
+    body:`Hej,\n\nVi mangler fortsat betaling på i alt ${kr} kr (se vedhæftede). Der er tilskrevet et rykkergebyr på 50 kr.\n${mp}\n\nBetal venligst hurtigst muligt${step>=3?" for at undgå overgivelse til inkasso":" for at undgå yderligere gebyrer"}.\nHar du allerede betalt, så se bort fra denne besked.\n\nMvh Sands Vinduespudsning` };
+}
 
 async function api(path){
   const r = await fetch("https://api.billysbilling.com"+path, {headers:{"X-Access-Token":TOKEN}});
@@ -96,10 +105,12 @@ async function computeDue(){
     const last=cyc.reduce((m,r)=>{ const d=toDate(r.createdTime); return (!m||d>m)?d:m; }, null);
     let nxt; if(cyc.length===0) nxt=0; else if(nFee===0) nxt=1; else if(nFee===1) nxt=2; else if(nFee===2) nxt=3; else nxt=4;
     const daysOver=dayDiff(today,cycleStart);
+    const total=items.reduce((s,iv)=>s+iv.balance,0);
     const rec={ cid, name:nbsp(c.name)||"(ukendt)", phone:phone(c.phone), n:items.length,
-                total:items.reduce((s,iv)=>s+iv.balance,0), days:daysOver, last,
+                total, days:daysOver, last, step:nxt, flatFee:(nxt>=1&&nxt<=3)?50:0,
                 invs:items.map(iv=>iv.invoiceNo), invoiceIds:items.map(iv=>iv.id),
                 contactPersonId:c.attContactPersonId||null };
+    if(nxt<=3){ const t=rykkerText(nxt,total); rec.subject=t.subject; rec.body=t.body; }
     if(nxt===0){ if(daysOver>=GRACE) buckets[0].push(rec); else waiting++; }
     else if(last && dayDiff(today,last)<GAP) waiting++;
     else buckets[nxt].push(rec);
@@ -138,6 +149,11 @@ async function buildRykker(){
       +`<span class="ry-sub">#${f.iv.invoiceNo} · ${esc(f.why)} · ${f.x.entryDate}</span></div><div class="ry-amt">${dk(f.iv.balance)} kr</div></div>`; }
     html+=`</div>`;
   }
-  return { rykkerHTML: html, rykkerSummary: { due:dueCount, fee:feeTotal, mapSize:brain.mapSize, flagged:exc.flagged.length } };
+  const rykkerItems = [].concat(buckets[0], buckets[1], buckets[2], buckets[3]).map(r => ({
+    cid:r.cid, contactPersonId:r.contactPersonId, invoiceIds:r.invoiceIds, step:r.step, flatFee:r.flatFee,
+    subject:r.subject, body:r.body, name:r.name, phone:r.phone, total:r.total, days:r.days, invs:r.invs,
+  }));
+  return { rykkerHTML: html, rykkerItems,
+           rykkerSummary: { due:dueCount, fee:feeTotal, mapSize:brain.mapSize, flagged:exc.flagged.length } };
 }
 module.exports = { buildRykker, computeDue, STEPS };
