@@ -150,6 +150,36 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
   padding:12px 20px;border-radius:99px;font-size:14px;font-weight:600;z-index:60;opacity:0;
   pointer-events:none;transition:opacity .2s,transform .2s}
 .toast.show{opacity:1;transform:translate(-50%,0)}
+/* tabs */
+.tabs{display:flex;gap:6px;background:var(--hair);padding:4px;border-radius:12px;margin:16px 0 18px}
+.tab{flex:1;border:none;background:transparent;color:var(--muted);font-family:inherit;font-size:15px;
+  font-weight:700;padding:10px;border-radius:9px;cursor:pointer}
+.tab.on{background:var(--card);color:var(--ink);box-shadow:0 1px 2px rgba(17,24,39,.06)}
+.intro{margin:0 0 16px;color:var(--muted);font-size:14.5px;line-height:1.55;max-width:52ch}
+.intro b{color:var(--ink);font-weight:600}
+/* rykker preview */
+.ry-note{background:var(--blue-bg);color:#274690;border-radius:12px;padding:12px 14px;font-size:13.5px;line-height:1.5;margin-bottom:14px}
+.ry-note b{color:var(--blue-d)}
+.ry-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px;margin-bottom:10px}
+.ry-chip{background:var(--card);border:1px solid var(--hair);border-radius:12px;padding:10px 8px;text-align:center}
+.ry-chip .k{display:block;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.01em}
+.ry-chip .v{display:block;font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px}
+.ry-chip.s0 .v{color:var(--muted)} .ry-chip.s1 .v,.ry-chip.s2 .v,.ry-chip.s3 .v{color:var(--blue)} .ry-chip.s4 .v{color:var(--red)}
+.ry-meta{font-size:12.5px;color:var(--muted);margin-bottom:16px;line-height:1.5}
+.ry-paid{color:var(--red);font-weight:600}
+.ry-sec{margin-bottom:16px}
+.ry-h{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:800;letter-spacing:-.01em;
+  padding-bottom:8px;border-bottom:2px solid var(--hair);margin-bottom:2px}
+.ry-h.s1,.ry-h.s2,.ry-h.s3{color:var(--blue)} .ry-h.s4,.ry-h.paid{color:var(--red)}
+.ry-n{margin-left:auto;font-size:13px;font-weight:700;color:#fff;background:var(--muted);
+  border-radius:20px;padding:1px 9px;min-width:22px;text-align:center}
+.ry-h.s1 .ry-n,.ry-h.s2 .ry-n,.ry-h.s3 .ry-n{background:var(--blue)} .ry-h.s4 .ry-n,.ry-h.paid .ry-n{background:var(--red)}
+.ry-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:11px 2px;border-bottom:1px solid var(--hair)}
+.ry-row:last-child{border-bottom:none}
+.ry-who{min-width:0}
+.ry-name{display:block;font-weight:700;font-size:15px;letter-spacing:-.01em;overflow-wrap:anywhere}
+.ry-sub{display:block;font-size:12.5px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
+.ry-amt{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:15px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -174,23 +204,33 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
 <div class="wrap" id="app" hidden>
   <header class="mast">
     <div class="eyebrow">Sands Vinduespudsning</div>
-    <h1>Ring til kunderne</h1>
-    <p>Start øverst, hvor der er mest at hente. Beløbet er <b>det kunden skal betale nu, inkl. moms</b>. Tryk <b>Ring</b> for at ringe op, eller <b>SMS</b> for en færdig besked. Tryk <b>Markér som kontaktet</b> bagefter.</p>
+    <h1 id="pageTitle">Ring til kunderne</h1>
   </header>
 
-  <div class="bar">
-    <div class="tot"><span class="lbl">Tilbage at hente</span><span class="num" id="remain">–</span></div>
-    <div class="track"><i id="fill"></i></div>
-    <div class="barrow">
-      <span class="pt" id="pt">–</span>
-      <span class="spacer"></span>
-      <button class="btn" id="hidebtn">Skjul færdige</button>
-      <button class="btn" id="resetbtn">Nulstil</button>
-      <button class="btn" id="lockbtn">Lås</button>
-    </div>
+  <div class="tabs no-print">
+    <button class="tab on" data-tab="opkald">Opkald</button>
+    <button class="tab" data-tab="rykker">Rykkere</button>
   </div>
 
-  <div id="list"></div>
+  <section id="panel-opkald">
+    <p class="intro">Start øverst, hvor der er mest at hente. Beløbet er <b>det kunden skal betale nu, inkl. moms</b>. Tryk <b>Ring</b> for at ringe op, eller <b>SMS</b> for en færdig besked. Tryk <b>Markér som kontaktet</b> bagefter.</p>
+    <div class="bar">
+      <div class="tot"><span class="lbl">Tilbage at hente</span><span class="num" id="remain">–</span></div>
+      <div class="track"><i id="fill"></i></div>
+      <div class="barrow">
+        <span class="pt" id="pt">–</span>
+        <span class="spacer"></span>
+        <button class="btn" id="hidebtn">Skjul færdige</button>
+        <button class="btn" id="resetbtn">Nulstil</button>
+        <button class="btn" id="lockbtn">Lås</button>
+      </div>
+    </div>
+    <div id="list"></div>
+  </section>
+
+  <section id="panel-rykker" hidden>
+    <div id="rykker"></div>
+  </section>
 
   <footer id="foot"></footer>
 </div>
@@ -254,8 +294,19 @@ lockform.addEventListener("submit",async e=>{
 function initApp(data){
   const app=document.getElementById("app");
   document.getElementById("list").innerHTML=data.cardsHTML;
+  document.getElementById("rykker").innerHTML=data.rykkerHTML||'<p class="intro">Ingen rykker-forhåndsvisning tilgængelig.</p>';
   document.getElementById("foot").innerHTML="Hentet fra Billy den "+data.stamp+" · "+data.nCust+" kunder · "+data.nInv+" fakturaer · beløb = restbeløb inkl. moms.<br>Fortroligt · kun til internt brug.";
   app.hidden=false;
+  // tabs
+  const titles={opkald:"Ring til kunderne", rykker:"Rykkere"};
+  document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
+    const which=t.dataset.tab;
+    document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===t));
+    document.getElementById("panel-opkald").hidden = which!=="opkald";
+    document.getElementById("panel-rykker").hidden = which!=="rykker";
+    document.getElementById("pageTitle").textContent = titles[which];
+    window.scrollTo(0,0);
+  }));
 
   const KEY="sands-opkald-secure-v1";
   const cards=[...document.querySelectorAll("#list .card")];

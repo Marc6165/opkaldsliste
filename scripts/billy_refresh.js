@@ -2,6 +2,7 @@
 /* Weekly refresh: pull overdue+unpaid invoices (older than 2 months) from Billy,
    rebuild the encrypted call list, write ../index.html. All secrets come from env. */
 const crypto = require('crypto'), fs = require('fs'), path = require('path');
+const { buildRykker } = require('./rykker');
 
 const TOKEN    = process.env.BILLY_TOKEN;
 const ORG      = process.env.BILLY_ORG_ID;
@@ -105,7 +106,14 @@ async function main(){
 
   const grandBal = custs.reduce((s,c) => s + c.bal, 0);
   const stamp = `${String(today0.getDate()).padStart(2,'0')}.${String(today0.getMonth()+1).padStart(2,'0')}.${today0.getFullYear()}`;
-  const payload = JSON.stringify({ cardsHTML: cards, nCust: custs.length, nInv: inv.length, grandBal: dk(grandBal), stamp });
+
+  // rykker preview (read-only; never blocks the call list if it fails)
+  let rk = { rykkerHTML: '', rykkerSummary: {} };
+  try { rk = await buildRykker(); console.log(`rykker preview: ${rk.rykkerSummary.due} due, map ${rk.rykkerSummary.mapSize}`); }
+  catch (e) { console.error('rykker preview skipped:', e.message); }
+
+  const payload = JSON.stringify({ cardsHTML: cards, nCust: custs.length, nInv: inv.length, grandBal: dk(grandBal), stamp,
+                                   rykkerHTML: rk.rykkerHTML, rykkerSummary: rk.rykkerSummary });
 
   // encrypt (AES-256-GCM, PBKDF2-SHA256) — WebCrypto compatible
   const salt = crypto.randomBytes(16), iv = crypto.randomBytes(12);
