@@ -71,7 +71,7 @@ function reconExclude(invs, contacts, brain){
 
 const STEPS=["Påmindelse","Rykker 1","Rykker 2","Rykker 3","Klar til inkasso"];
 
-async function buildRykker(){
+async function computeDue(){
   const now=new Date(); const today=new Date(now.getFullYear(),now.getMonth(),now.getDate());
   const yearStart=`${today.getFullYear()}-01-01`;
   const res=await api(`/v2/invoices?organizationId=${ORG}&include=invoice.contact&pageSize=1000&state%5B%5D=approved&isPaid=false&sortDirection=DESC&sortProperty=entryDate`);
@@ -96,18 +96,23 @@ async function buildRykker(){
     const last=cyc.reduce((m,r)=>{ const d=toDate(r.createdTime); return (!m||d>m)?d:m; }, null);
     let nxt; if(cyc.length===0) nxt=0; else if(nFee===0) nxt=1; else if(nFee===1) nxt=2; else if(nFee===2) nxt=3; else nxt=4;
     const daysOver=dayDiff(today,cycleStart);
-    const rec={ name:nbsp(c.name)||"(ukendt)", phone:phone(c.phone), n:items.length,
-                total:items.reduce((s,iv)=>s+iv.balance,0), days:daysOver, last };
+    const rec={ cid, name:nbsp(c.name)||"(ukendt)", phone:phone(c.phone), n:items.length,
+                total:items.reduce((s,iv)=>s+iv.balance,0), days:daysOver, last,
+                invs:items.map(iv=>iv.invoiceNo), contactPersonId:c.attContactPersonId||null };
     if(nxt===0){ if(daysOver>=GRACE) buckets[0].push(rec); else waiting++; }
     else if(last && dayDiff(today,last)<GAP) waiting++;
     else buckets[nxt].push(rec);
   }
   buckets.forEach(b=>b.sort((a,b)=>b.total-a.total));
-
-  // ---- render tab HTML ----
   const feeTotal = 50*(buckets[1].length+buckets[2].length+buckets[3].length);
   const dueCount = buckets.reduce((s,b)=>s+b.length,0);
   const stamp = `${String(today.getDate()).padStart(2,"0")}.${String(today.getMonth()+1).padStart(2,"0")}.${today.getFullYear()}`;
+  return { buckets, contacts, waiting, exc, brain, feeTotal, dueCount, stamp, today, STEPS };
+}
+
+async function buildRykker(){
+  const { buckets, waiting, exc, brain, feeTotal, dueCount, stamp } = await computeDue();
+  // ---- render tab HTML ----
   let html = `<div class="ry-note">📋 Forhåndsvisning pr. ${stamp} — <b>der sendes intet</b>. Kun kunder med gæld fra i år, mindst ${GRACE} dage forfalden.</div>`;
   html += `<div class="ry-sum">`;
   const feeLbl=(s)=> (s>=1&&s<=3)?` · 50 kr`:(s===4?` · manuel`:``);
@@ -134,4 +139,4 @@ async function buildRykker(){
   }
   return { rykkerHTML: html, rykkerSummary: { due:dueCount, fee:feeTotal, mapSize:brain.mapSize, flagged:exc.flagged.length } };
 }
-module.exports = { buildRykker };
+module.exports = { buildRykker, computeDue, STEPS };
