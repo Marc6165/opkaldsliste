@@ -7,7 +7,7 @@ const GAP = 10, GRACE = 7;
 const MOBILEPAY = process.env.MOBILEPAY || "22330482";
 function rykkerText(step, total){
   const kr = (Math.abs(total)).toFixed(2).replace(".",",").replace(/\B(?=(\d{3})+(?!\d))/g,".");
-  const pay = `Betal via betalingslinket eller MobilePay ${MOBILEPAY} (husk fakturanr.).`;
+  const pay = `Betal venligst via betalingslinket i mailen.`;
   if(step===0) return {
     subject:"Påmindelse om betaling",
     body:`Hej,\n\nVi mangler din betaling på ${kr} kr. ${pay}\n\nAllerede betalt? Se bort fra denne besked.\n\nMvh Sands Vinduespudsning`,

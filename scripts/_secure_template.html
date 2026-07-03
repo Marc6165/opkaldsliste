@@ -222,6 +222,7 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
   <div class="tabs no-print">
     <button class="tab on" data-tab="opkald">Opkald</button>
     <button class="tab" data-tab="rykker">Rykkere</button>
+    <button class="tab" data-tab="hold">Hold</button>
   </div>
 
   <section id="panel-opkald">
@@ -242,6 +243,10 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
 
   <section id="panel-rykker" hidden>
     <div id="rykker"></div>
+  </section>
+
+  <section id="panel-hold" hidden>
+    <div id="hold"></div>
   </section>
 
   <footer id="foot"></footer>
@@ -310,13 +315,15 @@ function initApp(data){
   document.getElementById("foot").innerHTML="Hentet fra Billy den "+data.stamp+" · "+data.nCust+" kunder · "+data.nInv+" fakturaer · beløb = restbeløb inkl. moms.<br>Fortroligt · kun til internt brug.";
   app.hidden=false;
   // tabs
-  const titles={opkald:"Ring til kunderne", rykker:"Rykkere"};
+  const titles={opkald:"Ring til kunderne", rykker:"Rykkere", hold:"Hold / tvister"};
   document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
     const which=t.dataset.tab;
     document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===t));
     document.getElementById("panel-opkald").hidden = which!=="opkald";
     document.getElementById("panel-rykker").hidden = which!=="rykker";
+    document.getElementById("panel-hold").hidden = which!=="hold";
     document.getElementById("pageTitle").textContent = titles[which];
+    if(which==="hold") renderHolds(data);
     window.scrollTo(0,0);
   }));
 
@@ -431,6 +438,42 @@ function initApp(data){
       flat.forEach(({id,it})=>{ if(holds[it.cid]){ const row=document.getElementById(id);
         if(row){ row.classList.add("ry-held"); row.querySelector(".hold").textContent="Frigiv"; row.querySelector(".ry-stat").textContent="på hold"; } } });
     }).catch(()=>{});
+  }
+
+  // ---- Hold / Tvister tab ----
+  function renderHolds(data){
+    const box=document.getElementById("hold"), W=data.workerUrl, SEC=data.appSecret;
+    if(!W){ box.innerHTML='<p class="intro">Backend ikke forbundet.</p>'; return; }
+    box.innerHTML='<p class="intro">Henter…</p>';
+    const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const reasonLbl={"manuelt hold":"Sat på hold manuelt","manual":"Sat på hold manuelt","sms-svar":"Svarede på SMS","email-svar":"Svarede på e-mail"};
+    const dt=ts=>{ try{const d=new Date(ts);return d.toLocaleDateString("da-DK",{day:"2-digit",month:"2-digit"})+" "+d.toLocaleTimeString("da-DK",{hour:"2-digit",minute:"2-digit"});}catch(e){return "";} };
+    fetch(W+"/state",{headers:{"Authorization":"Bearer "+SEC}}).then(r=>r.json()).then(d=>{
+      const holds=d.holds||{}, inbox=d.inbox||[], cids=Object.keys(holds);
+      let html=`<div class="ry-note">Kunder på hold får <b>ingen rykkere</b>, før du frigiver dem. Svar på SMS/e-mail sætter automatisk kunden på hold.</div>`;
+      html+=`<div class="ry-sec"><div class="ry-h">På hold <span class="ry-n">${cids.length}</span></div>`;
+      if(!cids.length) html+='<p class="intro" style="margin:8px 2px">Ingen kunder på hold. 👍</p>';
+      cids.forEach(cid=>{ const h=holds[cid];
+        html+=`<div class="ry-row" data-cid="${esc(cid)}"><div class="ry-who"><span class="ry-name">${esc(h.name||cid)}</span>`
+          +`<span class="ry-sub">${esc(reasonLbl[h.reason]||h.reason||"hold")} · ${dt(h.ts)}${h.text?' · «'+esc(String(h.text).slice(0,70))+'»':''}</span></div>`
+          +`<div class="ry-right"><button class="ry-btn hold-rel">Frigiv</button><span class="ry-stat"></span></div></div>`;
+      });
+      html+=`</div>`;
+      if(inbox.length){
+        html+=`<div class="ry-sec"><div class="ry-h">Seneste svar <span class="ry-n">${inbox.length}</span></div>`;
+        inbox.forEach(m=>{ html+=`<div class="ry-row"><div class="ry-who"><span class="ry-name">${esc(m.name||m.from||m.msisdn||"?")}</span>`
+          +`<span class="ry-sub">${m.ch==="sms"?"📱 SMS":"✉️ E-mail"} · ${dt(m.ts)}${m.contactId?"":" · (ikke matchet)"}<br>${esc(String(m.text||m.subject||"").slice(0,100))}</span></div></div>`; });
+        html+=`</div>`;
+      }
+      box.innerHTML=html;
+      box.querySelectorAll(".ry-row[data-cid]").forEach(row=>{
+        const cid=row.dataset.cid, btn=row.querySelector(".hold-rel"), stat=row.querySelector(".ry-stat");
+        btn&&btn.addEventListener("click",async()=>{ stat.textContent="…";
+          try{ await fetch(W+"/release",{method:"POST",headers:{"Authorization":"Bearer "+SEC,"Content-Type":"application/json"},body:JSON.stringify({contactId:cid})});
+            row.style.opacity=".4"; btn.disabled=true; stat.textContent="frigivet ✓";
+          }catch(e){ stat.textContent="fejl"; } });
+      });
+    }).catch(()=>{ box.innerHTML='<p class="intro">Kunne ikke hente hold.</p>'; });
   }
 
   render();

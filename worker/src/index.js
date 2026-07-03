@@ -66,7 +66,11 @@ export default {
     if (path === "/state") {
       const holds = await getHolds(env);
       const inbox = (await env.RYKKER.get("inbox", "json")) || [];
-      return j({ holds, inbox: inbox.slice(0, 50) }, 200, cors);
+      const names = (await env.RYKKER.get("namemap", "json")) || {};
+      const heldOut = {};
+      for (const cid in holds) heldOut[cid] = { ...holds[cid], name: names[cid] || null };
+      const inboxOut = inbox.slice(0, 50).map(x => ({ ...x, name: x.contactId ? (names[x.contactId] || null) : null }));
+      return j({ holds: heldOut, inbox: inboxOut }, 200, cors);
     }
     if (path === "/hold" && req.method === "POST") {
       const { contactId, reason } = await req.json();
@@ -79,9 +83,10 @@ export default {
     }
     // sync phone->contact and email->contact maps (posted by the daily Action) for reply matching
     if (path === "/maps" && req.method === "POST") {
-      const { phonemap, emailmap } = await req.json();
+      const { phonemap, emailmap, namemap } = await req.json();
       if (phonemap) await env.RYKKER.put("phonemap", JSON.stringify(phonemap));
       if (emailmap) await env.RYKKER.put("emailmap", JSON.stringify(emailmap));
+      if (namemap) await env.RYKKER.put("namemap", JSON.stringify(namemap));
       return j({ ok: true, phones: Object.keys(phonemap || {}).length, emails: Object.keys(emailmap || {}).length }, 200, cors);
     }
     // --- send approved rykkere via Billy (skips held; test=true routes to TEST_CONTACT) ---

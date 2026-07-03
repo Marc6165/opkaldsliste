@@ -20,23 +20,32 @@ async function pages(path, key) {
 }
 (async () => {
   const contacts = await pages(`/v2/contacts?organizationId=${ORG}&pageSize=1000`, "contacts");
-  const phonemap = {}, emailmap = {};
-  for (const c of contacts) { const d = String(c.phone || "").replace(/\D/g, ""); if (d.length === 8) phonemap[d] = c.id; }
-  // emailmap: only for customers with open invoices (those who could get an email rykker + reply)
-  const open = await pages(`/v2/invoices?organizationId=${ORG}&pageSize=1000&state%5B%5D=approved&isPaid=false&sortProperty=entryDate&sortDirection=DESC`, "invoices");
-  const cids = [...new Set(open.map(i => i.contactId))];
-  const pool = 8;
+  const phonemap = {}, emailmap = {}, namemap = {};
+  for (const c of contacts) {
+    const d = String(c.phone || "").replace(/\D/g, ""); if (d.length === 8) phonemap[d] = c.id;
+    namemap[c.id] = (c.name || "").replace(/ /g, " ").trim();
+  }
+  // emailmap: for ALL customers (any can go overdue later)
+  const cids = contacts.filter(c => c.isCustomer !== false).map(c => c.id);
+  const personsOf = async cid => {
+    for (let t = 0; t < 4; t++) {
+      try { const r = await api(`/v2/contactPersons?contactId=${cid}`); return r.contactPersons || []; }
+      catch (e) { await new Promise(r => setTimeout(r, 300 * (t + 1))); }
+    }
+    return null; // failed after retries
+  };
+  const pool = 5; let failed = 0;
   for (let i = 0; i < cids.length; i += pool) {
     await Promise.all(cids.slice(i, i + pool).map(async cid => {
-      try {
-        const r = await api(`/v2/contactPersons?contactId=${cid}`);
-        for (const p of (r.contactPersons || [])) if (p.email) emailmap[String(p.email).toLowerCase()] = cid;
-      } catch (e) {}
+      const ps = await personsOf(cid);
+      if (ps === null) { failed++; return; }
+      for (const p of ps) if (p.email) emailmap[String(p.email).toLowerCase()] = cid;
     }));
   }
+  if (failed) console.log(`push_maps: ${failed} contact-person lookups failed after retries`);
   const r = await fetch(WURL + "/maps", {
     method: "POST", headers: { "Authorization": "Bearer " + SEC, "Content-Type": "application/json" },
-    body: JSON.stringify({ phonemap, emailmap }),
+    body: JSON.stringify({ phonemap, emailmap, namemap }),
   });
-  console.log(`push_maps: HTTP ${r.status} · ${Object.keys(phonemap).length} phones · ${Object.keys(emailmap).length} emails`);
+  console.log(`push_maps: HTTP ${r.status} · ${Object.keys(phonemap).length} phones · ${Object.keys(emailmap).length} emails · ${Object.keys(namemap).length} names`);
 })().catch(e => { console.log("push_maps failed (non-fatal):", e.message); process.exit(0); });
