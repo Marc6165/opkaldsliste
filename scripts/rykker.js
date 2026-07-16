@@ -5,20 +5,40 @@ const TOKEN = process.env.BILLY_TOKEN;
 const BANK_ACCOUNT = process.env.BANK_ACCOUNT_ID || "19BAWJlST0C2wW4nASsalg"; // Frørup Andelskasse
 const GAP = 10, GRACE = 7;
 const MOBILEPAY = process.env.MOBILEPAY || "22330482";
-function rykkerText(step, total){
-  const kr = (Math.abs(total)).toFixed(2).replace(".",",").replace(/\B(?=(\d{3})+(?!\d))/g,".");
-  const pay = `Betal venligst via betalingslinket i mailen.`;
-  if(step===0) return {
-    subject:"Påmindelse om betaling",
-    body:`Hej,\n\nVi mangler din betaling på ${kr} kr. ${pay}\n\nAllerede betalt? Se bort fra denne besked.\n\nMvh Sands Vinduespudsning`,
-    message:"Venlig påmindelse om manglende betaling – se fakturaoversigt herunder.",
-  };
-  const inkasso = step>=3 ? " Ved fortsat manglende betaling overgives sagen til inkasso." : "";
-  return {
-    subject:`Rykker ${step} for manglende betaling`,
-    body:`Hej,\n\nVi mangler fortsat betaling på ${kr} kr. Der er tilføjet et rykkergebyr på 50 kr. ${pay}${inkasso}\n\nAllerede betalt? Se bort fra denne besked.\n\nMvh Sands Vinduespudsning`,
-    message:`Rykker ${step} – rykkergebyr 50 kr tilføjet. Se fakturaoversigt herunder.`,
-  };
+// service address for the email — from the invoice line ("Vinduespudsning af <adresse>"),
+// falling back to the contact name (Sands names most customers by their address).
+function svcAddr(iv, c){
+  let s = String((iv && iv.lineDescription) || "").replace(/ /g," ").trim();
+  s = s.replace(/^vinduespudsning\s*(inde\s+af|udvendig\s+af|udv\.?\s*af|af)?\s*/i, "");
+  s = s.split(/[:;]/)[0].replace(/\s+/g," ").trim();
+  if(!s) s = nbsp((c && c.name) || "").trim();
+  return s;
+}
+// Minimal reminder email — just enough to make them click Billy's pay button.
+// Amount lives in the subject; single line breaks. Billy renders the pay button below.
+function buildEmail(step, items, c, total, flatFee){
+  const rest = total + (flatFee || 0);
+  const title = step===0 ? "Betalingspåmindelse" : `Rykker ${step}`;
+  const gebyr = flatFee>0 ? ` Der er tilføjet et rykkergebyr på ${flatFee} kr.` : "";
+  const inkasso = step>=3 ? ` Betaler du ikke, sender vi sagen til inkasso.` : "";
+  const help = `Har du allerede betalt, kan du se bort fra beskeden. Hvis noget ikke stemmer, kan du svare direkte på mailen eller ringe til os på 22 33 04 82.`;
+  const message = step===0
+    ? "Venlig påmindelse om manglende betaling – se fakturaoversigt herunder."
+    : `Rykker ${step}${flatFee>0?` – rykkergebyr ${flatFee} kr tilføjet`:""}. Se fakturaoversigt herunder.`;
+
+  if(items.length===1){
+    const iv = items[0], addr = svcAddr(iv, c);
+    const open = step===0
+      ? `Betalingsfristen på faktura ${iv.invoiceNo} for vinduespudsning på ${addr} er overskredet, og vi kan endnu ikke se din betaling. Det kan selvfølgelig være en forglemmelse.`
+      : `Vi mangler fortsat betaling på faktura ${iv.invoiceNo} for vinduespudsning på ${addr}.${gebyr}${inkasso}`;
+    return { subject: `${title}: Faktura ${iv.invoiceNo} på ${dk(rest)} kr.`, body: `Hej,\n${open}\n${help}`, message };
+  }
+
+  const list = items.map(iv=>`• Faktura ${iv.invoiceNo} – ${svcAddr(iv,c)} – ${dk(iv.balance)} kr.`).join("\n");
+  const open = step===0
+    ? `Vi kan endnu ikke se din betaling for følgende fakturaer for vinduespudsning:`
+    : `Vi mangler fortsat betaling for følgende fakturaer for vinduespudsning:${gebyr}${inkasso}`;
+  return { subject: `${title}: ${items.length} fakturaer på ${dk(rest)} kr.`, body: `Hej,\n${open}\n${list}\n${help}`, message };
 }
 
 async function api(path){
@@ -117,7 +137,10 @@ async function computeDue(){
                 total, days:daysOver, last, step:nxt, flatFee:(nxt>=1&&nxt<=3)?50:0,
                 invs:items.map(iv=>iv.invoiceNo), invoiceIds:items.map(iv=>iv.id),
                 contactPersonId:c.attContactPersonId||null };
-    if(nxt<=3){ const t=rykkerText(nxt,total); rec.subject=t.subject; rec.body=t.body; rec.message=t.message; }
+    if(nxt<=3){
+      const em = buildEmail(nxt, items, c, total, rec.flatFee);
+      rec.subject = em.subject; rec.body = em.body; rec.message = em.message;
+    }
     if(nxt===0){ if(daysOver>=GRACE) buckets[0].push(rec); else waiting++; }
     else if(last && dayDiff(today,last)<GAP) waiting++;
     else buckets[nxt].push(rec);
@@ -173,4 +196,4 @@ async function buildRykker(){
   return { rykkerHTML: html, rykkerItems,
            rykkerSummary: { due:dueCount, fee:feeTotal, mapSize:brain.mapSize, flagged:exc.flagged.length } };
 }
-module.exports = { buildRykker, computeDue, STEPS };
+module.exports = { buildRykker, computeDue, STEPS, buildEmail, svcAddr };

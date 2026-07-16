@@ -124,6 +124,7 @@ export default {
       }
       return j({ results }, 200, cors);
     }
+
     return j({ error: "not found" }, 404, cors);
   },
 };
