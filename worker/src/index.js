@@ -7,16 +7,41 @@
  *   Vars:          BILLY_ORG_ID, TEST_CONTACT (optional), APP_ORIGIN
  *   Secrets:       BILLY_TOKEN, APP_SECRET, SMS_WEBHOOK_TOKEN
  */
+import shared from "../../scripts/email.js";
+const { buildEmail } = shared;
+
 const j = (o, s = 200, cors) =>
   new Response(JSON.stringify(o), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 
 async function getHolds(env) { return (await env.RYKKER.get("holds", "json")) || {}; }
 async function putHolds(env, h) { await env.RYKKER.put("holds", JSON.stringify(h)); }
 
+// Invoice-level holds, keyed by Billy invoiceId. Separate from contact holds because a
+// customer can owe on several invoices and only one of them may be disputed or paid —
+// pausing the whole customer would silence the rest too.
+async function getInvHolds(env) { return (await env.RYKKER.get("invholds", "json")) || {}; }
+async function putInvHolds(env, h) { await env.RYKKER.put("invholds", JSON.stringify(h)); }
+
 async function hold(env, contactId, reason, meta) {
   const h = await getHolds(env);
   h[contactId] = { reason: reason || "manual", ts: Date.now(), ...(meta || {}) };
   await putHolds(env, h); return h;
+}
+
+// Work out what a reminder actually covers once invoice holds are applied, and rebuild the
+// mail if that changed the set — the previewed subject/body were written before the hold
+// existed, and the app's copy of them can be a week old. Returns null if nothing is left.
+// Pure, so the outgoing mail can be tested without sending it.
+export function planSend(it, invHolds) {
+  const all = it.lines || (it.invoiceIds || []).map((id) => ({ id }));
+  const lines = all.filter((l) => !invHolds[l.id]);
+  if (!lines.length) return null;
+  const invoiceIds = lines.map((l) => l.id);
+  // nothing held (or an old page that never shipped `lines`): keep the previewed text
+  if (lines.length === all.length || !it.lines)
+    return { invoiceIds, subject: it.subject, body: it.body, message: it.message };
+  const em = buildEmail(it.step, lines, it.cname || it.name, it.flatFee || 0);
+  return { invoiceIds, subject: em.subject, body: em.body, message: em.message };
 }
 
 export default {
@@ -70,14 +95,28 @@ export default {
       const heldOut = {};
       for (const cid in holds) heldOut[cid] = { ...holds[cid], name: names[cid] || null };
       const inboxOut = inbox.slice(0, 50).map(x => ({ ...x, name: x.contactId ? (names[x.contactId] || null) : null }));
-      return j({ holds: heldOut, inbox: inboxOut }, 200, cors);
+      // `sent` is the per-invoice dunning history the weekly refresh reads back to work
+      // out each invoice's step — Billy cannot tell us which invoice a reminder was for.
+      return j({ holds: heldOut, invHolds: await getInvHolds(env), inbox: inboxOut,
+                 sent: (await env.RYKKER.get("sent", "json")) || [] }, 200, cors);
     }
     if (path === "/hold" && req.method === "POST") {
-      const { contactId, reason } = await req.json();
+      const { contactId, invoiceId, invoiceNo, name, reason } = await req.json();
+      if (invoiceId) {
+        const h = await getInvHolds(env);
+        h[invoiceId] = { reason: reason || "manual", ts: Date.now(), contactId: contactId || null,
+                         invoiceNo: invoiceNo || null, name: name || null };
+        await putInvHolds(env, h);
+        return j({ ok: true, invHolds: h }, 200, cors);
+      }
       return j({ ok: true, holds: await hold(env, contactId, reason || "manual") }, 200, cors);
     }
     if (path === "/release" && req.method === "POST") {
-      const { contactId } = await req.json();
+      const { contactId, invoiceId } = await req.json();
+      if (invoiceId) {
+        const h = await getInvHolds(env); delete h[invoiceId]; await putInvHolds(env, h);
+        return j({ ok: true, invHolds: h }, 200, cors);
+      }
       const h = await getHolds(env); delete h[contactId]; await putHolds(env, h);
       return j({ ok: true, holds: h }, 200, cors);
     }
@@ -93,20 +132,26 @@ export default {
     if (path === "/send" && req.method === "POST") {
       const { items } = await req.json();
       const holds = await getHolds(env);
+      const invHolds = await getInvHolds(env);
       const liveEnabled = env.LIVE === "1";      // master switch — off until validated
       const results = [];
       for (const it of items || []) {
         if (holds[it.contactId]) { results.push({ contactId: it.contactId, skipped: "held" }); continue; }
         // safety: while LIVE is off, only the test contact may receive anything
         if (!liveEnabled && it.contactId !== env.TEST_CONTACT) { results.push({ contactId: it.contactId, skipped: "live-off" }); continue; }
+
+        const plan = planSend(it, invHolds);
+        if (!plan) { results.push({ contactId: it.contactId, skipped: "held" }); continue; }
+        const { invoiceIds, subject, body, message } = plan;
+
         const payload = {
           organizationId: env.BILLY_ORG_ID,
           contactId: it.contactId,
           ...(it.contactPersonId ? { contactPersonId: it.contactPersonId } : {}),
           flatFee: it.flatFee || 0, percentageFee: 0, feeCurrencyId: "DKK",
           sendEmail: it.sendEmail !== false,
-          emailSubject: it.subject, emailBody: it.body, message: it.message || it.body,
-          associations: (it.invoiceIds || []).map((id) => ({ invoiceId: id })),
+          emailSubject: subject, emailBody: body, message: message || body,
+          associations: invoiceIds.map((id) => ({ invoiceId: id })),
         };
         try {
           const r = await fetch("https://api.billysbilling.com/v2/invoiceReminders", {
@@ -114,10 +159,12 @@ export default {
             headers: { "X-Access-Token": env.BILLY_TOKEN, "Content-Type": "application/json" },
             body: JSON.stringify({ invoiceReminder: payload }),
           });
-          results.push({ contactId: it.contactId, status: r.status, ok: r.ok, mode: liveEnabled ? "live" : "test" });
+          results.push({ contactId: it.contactId, status: r.status, ok: r.ok, sent: invoiceIds.length, mode: liveEnabled ? "live" : "test" });
           if (r.ok) {
+            // The invoiceIds here are the whole point: this log is the system of record for
+            // per-invoice cadence, since Billy will never hand these back to us on read.
             const log = (await env.RYKKER.get("sent", "json")) || [];
-            log.unshift({ contactId: it.contactId, step: it.step, fee: it.flatFee || 0, ts: Date.now() });
+            log.unshift({ contactId: it.contactId, invoiceIds, step: it.step, fee: it.flatFee || 0, ts: Date.now() });
             await env.RYKKER.put("sent", JSON.stringify(log.slice(0, 1000)));
           }
         } catch (e) { results.push({ contactId: it.contactId, error: String(e).slice(0, 120) }); }

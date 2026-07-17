@@ -5,40 +5,22 @@ const TOKEN = process.env.BILLY_TOKEN;
 const BANK_ACCOUNT = process.env.BANK_ACCOUNT_ID || "19BAWJlST0C2wW4nASsalg"; // Frørup Andelskasse
 const GAP = 10, GRACE = 7;
 const MOBILEPAY = process.env.MOBILEPAY || "22330482";
-// service address for the email — from the invoice line ("Vinduespudsning af <adresse>"),
-// falling back to the contact name (Sands names most customers by their address).
-function svcAddr(iv, c){
-  let s = String((iv && iv.lineDescription) || "").replace(/ /g," ").trim();
-  s = s.replace(/^vinduespudsning\s*(inde\s+af|udvendig\s+af|udv\.?\s*af|af)?\s*/i, "");
-  s = s.split(/[:;]/)[0].replace(/\s+/g," ").trim();
-  if(!s) s = nbsp((c && c.name) || "").trim();
-  return s;
-}
-// Minimal reminder email — just enough to make them click Billy's pay button.
-// Amount lives in the subject; single line breaks. Billy renders the pay button below.
-function buildEmail(step, items, c, total, flatFee){
-  const rest = total + (flatFee || 0);
-  const title = step===0 ? "Betalingspåmindelse" : `Rykker ${step}`;
-  const gebyr = flatFee>0 ? ` Der er tilføjet et rykkergebyr på ${flatFee} kr.` : "";
-  const inkasso = step>=3 ? ` Betaler du ikke, sender vi sagen til inkasso.` : "";
-  const help = `Har du allerede betalt, kan du se bort fra beskeden. Hvis noget ikke stemmer, kan du svare direkte på mailen eller ringe til os på 22 33 04 82.`;
-  const message = step===0
-    ? "Venlig påmindelse om manglende betaling – se fakturaoversigt herunder."
-    : `Rykker ${step}${flatFee>0?` – rykkergebyr ${flatFee} kr tilføjet`:""}. Se fakturaoversigt herunder.`;
+const WORKER = (process.env.WORKER_URL || "").replace(/\/$/, "");
+const SECRET = process.env.APP_SECRET || "";
+const { dk, nbsp, svcAddr, buildEmail } = require("./email");
 
-  if(items.length===1){
-    const iv = items[0], addr = svcAddr(iv, c);
-    const open = step===0
-      ? `Betalingsfristen på faktura ${iv.invoiceNo} for vinduespudsning på ${addr} er overskredet, og vi kan endnu ikke se din betaling. Det kan selvfølgelig være en forglemmelse.`
-      : `Vi mangler fortsat betaling på faktura ${iv.invoiceNo} for vinduespudsning på ${addr}.${gebyr}${inkasso}`;
-    return { subject: `${title}: Faktura ${iv.invoiceNo} på ${dk(rest)} kr.`, body: `Hej,\n${open}\n${help}`, message };
-  }
-
-  const list = items.map(iv=>`• Faktura ${iv.invoiceNo} – ${svcAddr(iv,c)} – ${dk(iv.balance)} kr.`).join("\n");
-  const open = step===0
-    ? `Vi kan endnu ikke se din betaling for følgende fakturaer for vinduespudsning:`
-    : `Vi mangler fortsat betaling for følgende fakturaer for vinduespudsning:${gebyr}${inkasso}`;
-  return { subject: `${title}: ${items.length} fakturaer på ${dk(rest)} kr.`, body: `Hej,\n${open}\n${list}\n${help}`, message };
+// Our own send log is the only per-invoice dunning history that exists: Billy's
+// reminder records carry a contactId and nothing else (the invoice `associations`
+// you POST are write-only and never returned on read), so cadence has to be tracked
+// here. Falls back to [] when the Worker is unreachable, which drops each invoice to
+// its Billy-derived step rather than blocking the call list.
+async function sentLog(){
+  if(!WORKER || !SECRET) return [];
+  try{
+    const r = await fetch(WORKER+"/state", { headers:{ Authorization: "Bearer "+SECRET } });
+    if(!r.ok) throw new Error("worker "+r.status);
+    return (await r.json()).sent || [];
+  }catch(e){ console.error("send log unavailable:", e.message); return []; }
 }
 
 async function api(path){
@@ -58,9 +40,6 @@ async function pages(path, key, maxPages=12){
   return out;
 }
 const round2 = x => Math.round(x*100)/100;
-const nbsp = s => (s||"").replace(/ /g," ").replace(/\s+/g," ").trim();
-function dk(x){ const n=x<0; x=Math.abs(x); const [i,f]=x.toFixed(2).split(".");
-  return (n?"-":"")+i.replace(/\B(?=(\d{3})+(?!\d))/g,".")+","+f; }
 const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 function toDate(s){ if(!s) return null; const [y,m,d]=s.slice(0,10).split("-"); return new Date(+y,+m-1,+d); }
 const dayDiff = (a,b)=>Math.round((a-b)/86400000);
@@ -119,31 +98,60 @@ async function computeDue(){
 
   const rems=await pages(`/v2/invoiceReminders?organizationId=${ORG}&pageSize=1000`,"invoiceReminders");
   const remByC={}; rems.forEach(r=>{ (remByC[r.contactId]=remByC[r.contactId]||[]).push(r); });
+  const sent=await sentLog();
+  const sentByInv={}; sent.forEach(s=>(s.invoiceIds||[]).forEach(id=>{ (sentByInv[id]=sentByInv[id]||[]).push(s); }));
 
   const overdue=invs.filter(iv=>{ const dd=toDate(iv.dueDate); return dd && dd<today && !exc.excluded.has(iv.invoiceNo); });
-  const byC={}; overdue.forEach(iv=>{ (byC[iv.contactId]=byC[iv.contactId]||[]).push(iv); });
 
-  const buckets=[[],[],[],[],[]]; let waiting=0;
-  for(const cid in byC){
-    const items=byC[cid], c=contacts[cid]||{};
-    const cycleStart=items.reduce((m,iv)=>{ const d=toDate(iv.dueDate); return (!m||d<m)?d:m; }, null);
-    const cyc=(remByC[cid]||[]).filter(r=>toDate(r.createdTime)>=cycleStart);
-    const nFee=cyc.filter(r=>(r.flatFee||0)>0).length;
-    const last=cyc.reduce((m,r)=>{ const d=toDate(r.createdTime); return (!m||d>m)?d:m; }, null);
-    let nxt; if(cyc.length===0) nxt=0; else if(nFee===0) nxt=1; else if(nFee===1) nxt=2; else if(nFee===2) nxt=3; else nxt=4;
-    const daysOver=dayDiff(today,cycleStart);
-    const total=items.reduce((s,iv)=>s+iv.balance,0);
-    const rec={ cid, name:nbsp(c.name)||"(ukendt)", phone:phone(c.phone), n:items.length,
-                total, days:daysOver, last, step:nxt, flatFee:(nxt>=1&&nxt<=3)?50:0,
-                invs:items.map(iv=>iv.invoiceNo), invoiceIds:items.map(iv=>iv.id),
+  // Cadence is per invoice: each one has its own grace period, its own 10-day gap and
+  // its own step, so a fresh invoice never inherits an older one's step (or its fee).
+  // Invoices that come due today are then bundled into one reminder per (customer, step)
+  // — different steps carry different fees, so they cannot share a single Billy reminder
+  // and deliberately go out as separate mails.
+  const groups={}; let waiting=0;
+  for(const iv of overdue){
+    const hist=sentByInv[iv.id]||[];
+    let nxt, last;
+    if(hist.length){
+      nxt=Math.min(hist.reduce((m,h)=>Math.max(m, typeof h.step==="number"?h.step:-1), -1)+1, 4);
+      last=new Date(Math.max(...hist.map(h=>h.ts)));
+    } else {
+      // Nothing logged for this invoice, so fall back to Billy's customer-level history —
+      // the only trace of rykkere sent by hand from Billy's own UI. Count only reminders
+      // raised after this invoice fell due; older ones were about something else.
+      const dd=toDate(iv.dueDate);
+      const cyc=(remByC[iv.contactId]||[]).filter(r=>toDate(r.createdTime)>=dd);
+      const nFee=cyc.filter(r=>(r.flatFee||0)>0).length;
+      nxt = cyc.length===0 ? 0 : nFee===0 ? 1 : nFee===1 ? 2 : nFee===2 ? 3 : 4;
+      last = cyc.reduce((m,r)=>{ const d=toDate(r.createdTime); return (!m||d>m)?d:m; }, null);
+    }
+    const daysOver=dayDiff(today,toDate(iv.dueDate));
+    if(nxt===0 ? daysOver<GRACE : (last && dayDiff(today,last)<GAP)){ waiting++; continue; }
+    const k=iv.contactId+"|"+nxt;
+    const g=groups[k]=groups[k]||{ cid:iv.contactId, step:nxt, items:[], last:null, days:0 };
+    g.items.push(iv);
+    if(last && (!g.last || last>g.last)) g.last=last;
+    if(daysOver>g.days) g.days=daysOver;
+  }
+
+  const buckets=[[],[],[],[],[]];
+  for(const k in groups){
+    const g=groups[k], c=contacts[g.cid]||{}, cname=nbsp(c.name);
+    const total=g.items.reduce((s,iv)=>s+iv.balance,0);
+    const flatFee=(g.step>=1&&g.step<=3)?50:0;
+    const rec={ cid:g.cid, name:cname||"(ukendt)", cname, phone:phone(c.phone), n:g.items.length,
+                total, days:g.days, last:g.last, step:g.step, flatFee,
+                invs:g.items.map(iv=>iv.invoiceNo), invoiceIds:g.items.map(iv=>iv.id),
+                // shipped so the Worker can rebuild the mail from whichever invoices
+                // survive the holds at send time, instead of trusting this snapshot
+                lines:g.items.map(iv=>({ id:iv.id, invoiceNo:iv.invoiceNo,
+                                         lineDescription:iv.lineDescription||"", balance:iv.balance })),
                 contactPersonId:c.attContactPersonId||null };
-    if(nxt<=3){
-      const em = buildEmail(nxt, items, c, total, rec.flatFee);
+    if(g.step<=3){
+      const em = buildEmail(g.step, g.items, cname, flatFee);
       rec.subject = em.subject; rec.body = em.body; rec.message = em.message;
     }
-    if(nxt===0){ if(daysOver>=GRACE) buckets[0].push(rec); else waiting++; }
-    else if(last && dayDiff(today,last)<GAP) waiting++;
-    else buckets[nxt].push(rec);
+    buckets[g.step].push(rec);
   }
   buckets.forEach(b=>b.sort((a,b)=>b.total-a.total));
   const feeTotal = 50*(buckets[1].length+buckets[2].length+buckets[3].length);
@@ -190,7 +198,8 @@ async function buildRykker(){
   }
   const rykkerItems = dueRecs.map(r => ({
     cid:r.cid, contactPersonId:r.contactPersonId, invoiceIds:r.invoiceIds, step:r.step, flatFee:r.flatFee,
-    subject:r.subject, body:r.body, message:r.message, name:r.name, phone:r.phone, total:r.total, days:r.days, invs:r.invs,
+    subject:r.subject, body:r.body, message:r.message, name:r.name, cname:r.cname, phone:r.phone,
+    total:r.total, days:r.days, invs:r.invs, lines:r.lines,
     hasEmail: emailCids.has(r.cid),
   }));
   return { rykkerHTML: html, rykkerItems,

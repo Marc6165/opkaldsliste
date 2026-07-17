@@ -1,2 +1,5 @@
 node_modules/
 .worker-secrets
+.dev.vars
+.wrangler/state/
+.wrangler/cache/cf.json
