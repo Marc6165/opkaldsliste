@@ -84,9 +84,26 @@ export default {
       return j({ ok: true, matched: !!contactId }, 200, cors);
     }
 
+    // --- serve the app itself (public: the payload is client-side encrypted, same as
+    //     it was on GitHub Pages). Lets us publish without depending on the Pages deploy,
+    //     which jams. no-cache so a fresh publish is picked up on the next load. ---
+    if ((path === "/" || path === "/app" || path === "/index.html") && req.method === "GET") {
+      const html = await env.RYKKER.get("apphtml");
+      if (!html) return new Response("Endnu ikke publiceret.", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      return new Response(html, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" } });
+    }
+
     // --- everything else needs the app secret ---
     if ((req.headers.get("Authorization") || "") !== "Bearer " + env.APP_SECRET)
       return j({ error: "unauthorized" }, 401, cors);
+
+    // publish a freshly built index.html (posted by the refresh Action). Body = raw HTML.
+    if (path === "/publish" && req.method === "POST") {
+      const html = await req.text();
+      if (!html || html.length < 1000) return j({ error: "empty or too small" }, 400, cors);
+      await env.RYKKER.put("apphtml", html);
+      return j({ ok: true, bytes: html.length }, 200, cors);
+    }
 
     if (path === "/state") {
       const holds = await getHolds(env);

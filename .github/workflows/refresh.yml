@@ -34,6 +34,17 @@ jobs:
           APP_SECRET: ${{ secrets.APP_SECRET }}
         run: node scripts/billy_refresh.js
 
+      - name: Publicér app til Worker (uafhængigt af GitHub Pages)
+        env:
+          WORKER_URL: ${{ secrets.WORKER_URL }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+        run: |
+          curl -sf -X POST "$WORKER_URL/publish" \
+            -H "Authorization: Bearer $APP_SECRET" \
+            -H "Content-Type: text/html" \
+            --data-binary @index.html \
+            && echo "Publiceret til Worker" || { echo "Worker-publicering fejlede"; exit 1; }
+
       - name: Synk kontakt-maps til Worker (for auto-hold ved svar)
         env:
           BILLY_TOKEN: ${{ secrets.BILLY_TOKEN }}
