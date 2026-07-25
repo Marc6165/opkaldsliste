@@ -101,6 +101,21 @@ async function computeDue(){
   const sent=await sentLog();
   const sentByInv={}; sent.forEach(s=>(s.invoiceIds||[]).forEach(id=>{ (sentByInv[id]=sentByInv[id]||[]).push(s); }));
 
+  // Every app-send also lands in Billy as a contactId-only reminder. Those are already
+  // tracked precisely, per invoice, in the send log (sentByInv), so strip them out of the
+  // customer-level Billy pool — otherwise the fallback below would count a reminder we
+  // sent for one invoice against a *different*, genuinely-fresh invoice of the same
+  // customer (which is why a new invoice on a just-reminded customer was disappearing).
+  // Each app-send made exactly one reminder and app-sends are the most recent, so drop the
+  // N newest per contact. Ordering (not exact timestamps) keeps this timezone-robust —
+  // Billy's createdTime and our log ts are offset by hours.
+  const appSends={}; sent.forEach(s=>{ appSends[s.contactId]=(appSends[s.contactId]||0)+1; });
+  for(const cid in appSends){
+    const list=remByC[cid]; if(!list) continue;
+    list.sort((a,b)=>Date.parse(b.createdTime)-Date.parse(a.createdTime));  // newest first
+    remByC[cid]=list.slice(appSends[cid]);                                  // drop our own sends
+  }
+
   const overdue=invs.filter(iv=>{ const dd=toDate(iv.dueDate); return dd && dd<today && !exc.excluded.has(iv.invoiceNo); });
 
   // Cadence is per invoice: each one has its own grace period, its own 10-day gap and
