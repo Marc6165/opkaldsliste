@@ -187,21 +187,31 @@ async function buildRykker(){
       +`<span class="ry-sub">#${f.iv.invoiceNo} · ${esc(f.why)} · ${f.x.entryDate}</span></div><div class="ry-amt">${dk(f.iv.balance)} kr</div></div>`; }
     html+=`</div>`;
   }
-  // which due customers actually have an email (email rykkere can only reach those)
+  // Resolve the actual email recipient per due customer. Billy 422s a reminder with
+  // sendEmail:true unless it can name a recipient, and it will NOT fall back to a
+  // contactPerson that isn't primary — so we must pass the contactPersonId ourselves.
+  // Prefer the account's attention-person, then the primary, then any address on file.
   const dueRecs = [].concat(buckets[0], buckets[1], buckets[2], buckets[3]);
   const dueCids = [...new Set(dueRecs.map(r => r.cid))];
-  const emailCids = new Set();
+  const recipientByCid = {};
   for (let i = 0; i < dueCids.length; i += 6) {
     await Promise.all(dueCids.slice(i, i + 6).map(async cid => {
-      try { const r = await api(`/v2/contactPersons?contactId=${cid}`); if ((r.contactPersons || []).some(p => p.email)) emailCids.add(cid); } catch (e) {}
+      try {
+        const withEmail = ((await api(`/v2/contactPersons?contactId=${cid}`)).contactPersons || []).filter(p => p.email);
+        if (withEmail.length) recipientByCid[cid] = (withEmail.find(p => p.isPrimary) || withEmail[0]).id;
+      } catch (e) {}
     }));
   }
-  const rykkerItems = dueRecs.map(r => ({
-    cid:r.cid, contactPersonId:r.contactPersonId, invoiceIds:r.invoiceIds, step:r.step, flatFee:r.flatFee,
-    subject:r.subject, body:r.body, message:r.message, name:r.name, cname:r.cname, phone:r.phone,
-    total:r.total, days:r.days, invs:r.invs, lines:r.lines,
-    hasEmail: emailCids.has(r.cid),
-  }));
+  const rykkerItems = dueRecs.map(r => {
+    // attContactPersonId wins if set (that's who Billy would use); else the resolved one
+    const contactPersonId = r.contactPersonId || recipientByCid[r.cid] || null;
+    return {
+      cid:r.cid, contactPersonId, invoiceIds:r.invoiceIds, step:r.step, flatFee:r.flatFee,
+      subject:r.subject, body:r.body, message:r.message, name:r.name, cname:r.cname, phone:r.phone,
+      total:r.total, days:r.days, invs:r.invs, lines:r.lines,
+      hasEmail: !!contactPersonId,   // only true when we can actually address the mail
+    };
+  });
   return { rykkerHTML: html, rykkerItems,
            rykkerSummary: { due:dueCount, fee:feeTotal, mapSize:brain.mapSize, flagged:exc.flagged.length } };
 }
