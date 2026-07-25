@@ -450,7 +450,8 @@ function initApp(data){
           if(res.ok){ stat.textContent=`sendt ✓${res.sent&&res.sent<invEls.length?` (${res.sent} af ${invEls.length})`:""}`; row.classList.add("ry-done"); }
           else if(res.skipped==="live-off"){ stat.textContent="LIVE fra – intet sendt"; }
           else if(res.skipped==="held"){ stat.textContent="på hold"; }
-          else{ stat.textContent="fejl ("+(res.status||res.error||"?")+")"; }
+          else if(res.skipped==="no-recipient"){ stat.textContent="ingen e-mail-modtager i Billy"; }
+          else{ stat.textContent = res.billyError ? ("fejl: "+res.billyError).slice(0,90) : ("fejl ("+(res.status||res.error||"?")+")"); }
         }catch(e){ stat.textContent="netværksfejl"; }
       });
       invEls.forEach(el=>{

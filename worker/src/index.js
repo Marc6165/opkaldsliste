@@ -161,10 +161,24 @@ export default {
         if (!plan) { results.push({ contactId: it.contactId, skipped: "held" }); continue; }
         const { invoiceIds, subject, body, message } = plan;
 
+        // Billy 422s a reminder without a contactPersonId ("required field"). The preview
+        // resolves it, but a stale tab may have been built before that fix — so resolve it
+        // here too, straight from Billy. Prefer the primary contact person, else any with
+        // an email. No recipient at all -> skip cleanly instead of firing a doomed request.
+        let contactPersonId = it.contactPersonId;
+        if (!contactPersonId) {
+          try {
+            const ps = ((await (await fetch(`https://api.billysbilling.com/v2/contactPersons?contactId=${it.contactId}`,
+              { headers: { "X-Access-Token": env.BILLY_TOKEN } })).json()).contactPersons || []).filter(p => p.email);
+            if (ps.length) contactPersonId = (ps.find(p => p.isPrimary) || ps[0]).id;
+          } catch (e) {}
+        }
+        if (!contactPersonId) { results.push({ contactId: it.contactId, skipped: "no-recipient" }); continue; }
+
         const payload = {
           organizationId: env.BILLY_ORG_ID,
           contactId: it.contactId,
-          ...(it.contactPersonId ? { contactPersonId: it.contactPersonId } : {}),
+          contactPersonId,
           flatFee: it.flatFee || 0, percentageFee: 0, feeCurrencyId: "DKK",
           sendEmail: it.sendEmail !== false,
           emailSubject: subject, emailBody: body, message: message || body,
@@ -176,7 +190,15 @@ export default {
             headers: { "X-Access-Token": env.BILLY_TOKEN, "Content-Type": "application/json" },
             body: JSON.stringify({ invoiceReminder: payload }),
           });
-          results.push({ contactId: it.contactId, status: r.status, ok: r.ok, sent: invoiceIds.length, mode: liveEnabled ? "live" : "test" });
+          // surface Billy's reason on failure so the app never shows a bare "fejl (422)"
+          let billyError;
+          if (!r.ok) {
+            const t = await r.clone().text().catch(() => "");
+            try { const e = JSON.parse(t); billyError = e.errorMessage
+              || (e.validationErrors && JSON.stringify(e.validationErrors)) || (t || "").slice(0, 160); }
+            catch { billyError = (t || "").slice(0, 160); }
+          }
+          results.push({ contactId: it.contactId, status: r.status, ok: r.ok, sent: invoiceIds.length, mode: liveEnabled ? "live" : "test", ...(billyError ? { billyError } : {}) });
           if (r.ok) {
             // The invoiceIds here are the whole point: this log is the system of record for
             // per-invoice cadence, since Billy will never hand these back to us on read.
