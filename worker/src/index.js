@@ -161,18 +161,19 @@ export default {
         if (!plan) { results.push({ contactId: it.contactId, skipped: "held" }); continue; }
         const { invoiceIds, subject, body, message } = plan;
 
-        // Billy 422s a reminder without a contactPersonId ("required field"). The preview
-        // resolves it, but a stale tab may have been built before that fix — so resolve it
-        // here too, straight from Billy. Prefer the primary contact person, else any with
-        // an email. No recipient at all -> skip cleanly instead of firing a doomed request.
-        let contactPersonId = it.contactPersonId;
-        if (!contactPersonId) {
-          try {
-            const ps = ((await (await fetch(`https://api.billysbilling.com/v2/contactPersons?contactId=${it.contactId}`,
-              { headers: { "X-Access-Token": env.BILLY_TOKEN } })).json()).contactPersons || []).filter(p => p.email);
-            if (ps.length) contactPersonId = (ps.find(p => p.isPrimary) || ps[0]).id;
-          } catch (e) {}
-        }
+        // Billy 422s a reminder without a contactPersonId ("required field") and won't use a
+        // non-primary contact person. The page supplies one, but it can be stale, empty, or
+        // point at a deleted person — so resolve live from Billy and PREFER that (the live
+        // primary is always valid), falling back to the page's value only if the lookup
+        // finds nothing. This makes the Worker authoritative on the recipient, immune to a
+        // stale tab. Genuinely no address -> skip cleanly instead of firing a doomed request.
+        let contactPersonId;
+        try {
+          const ps = ((await (await fetch(`https://api.billysbilling.com/v2/contactPersons?contactId=${it.contactId}`,
+            { headers: { "X-Access-Token": env.BILLY_TOKEN } })).json()).contactPersons || []).filter(p => p.email);
+          if (ps.length) contactPersonId = (ps.find(p => p.isPrimary) || ps[0]).id;
+        } catch (e) {}
+        contactPersonId = contactPersonId || it.contactPersonId;
         if (!contactPersonId) { results.push({ contactId: it.contactId, skipped: "no-recipient" }); continue; }
 
         const payload = {
@@ -190,13 +191,19 @@ export default {
             headers: { "X-Access-Token": env.BILLY_TOKEN, "Content-Type": "application/json" },
             body: JSON.stringify({ invoiceReminder: payload }),
           });
-          // surface Billy's reason on failure so the app never shows a bare "fejl (422)"
+          // surface Billy's reason on failure — the specific validation field if there is
+          // one ("contactPersonId: This is a required field."), not the generic wrapper.
           let billyError;
           if (!r.ok) {
             const t = await r.clone().text().catch(() => "");
-            try { const e = JSON.parse(t); billyError = e.errorMessage
-              || (e.validationErrors && JSON.stringify(e.validationErrors)) || (t || "").slice(0, 160); }
-            catch { billyError = (t || "").slice(0, 160); }
+            try {
+              const e = JSON.parse(t), attrs = [];
+              for (const rec in (e.validationErrors || {})) {
+                const a = e.validationErrors[rec] && e.validationErrors[rec].attributes;
+                if (a) for (const f in a) attrs.push(`${f}: ${a[f]}`);
+              }
+              billyError = attrs.length ? attrs.join("; ") : (e.errorMessage || (t || "").slice(0, 160));
+            } catch { billyError = (t || "").slice(0, 160); }
           }
           results.push({ contactId: it.contactId, status: r.status, ok: r.ok, sent: invoiceIds.length, mode: liveEnabled ? "live" : "test", ...(billyError ? { billyError } : {}) });
           if (r.ok) {
