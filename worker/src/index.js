@@ -153,12 +153,17 @@ export default {
       const liveEnabled = env.LIVE === "1";      // master switch — off until validated
       const results = [];
       for (const it of items || []) {
-        if (holds[it.contactId]) { results.push({ contactId: it.contactId, skipped: "held" }); continue; }
+        // The app builds each item with the contact id under `cid` (see rykker.js). Read
+        // that; `it.contactId` is only for hand-crafted test payloads. Getting this wrong
+        // is invisible until send time — the contact id then arrives at Billy as undefined
+        // ("contactId: This is a required field."), which is exactly what happened.
+        const contactId = it.cid || it.contactId;
+        if (holds[contactId]) { results.push({ contactId, skipped: "held" }); continue; }
         // safety: while LIVE is off, only the test contact may receive anything
-        if (!liveEnabled && it.contactId !== env.TEST_CONTACT) { results.push({ contactId: it.contactId, skipped: "live-off" }); continue; }
+        if (!liveEnabled && contactId !== env.TEST_CONTACT) { results.push({ contactId, skipped: "live-off" }); continue; }
 
         const plan = planSend(it, invHolds);
-        if (!plan) { results.push({ contactId: it.contactId, skipped: "held" }); continue; }
+        if (!plan) { results.push({ contactId, skipped: "held" }); continue; }
         const { invoiceIds, subject, body, message } = plan;
 
         // Billy 422s a reminder without a contactPersonId ("required field") and won't use a
@@ -169,16 +174,16 @@ export default {
         // stale tab. Genuinely no address -> skip cleanly instead of firing a doomed request.
         let contactPersonId;
         try {
-          const ps = ((await (await fetch(`https://api.billysbilling.com/v2/contactPersons?contactId=${it.contactId}`,
+          const ps = ((await (await fetch(`https://api.billysbilling.com/v2/contactPersons?contactId=${contactId}`,
             { headers: { "X-Access-Token": env.BILLY_TOKEN } })).json()).contactPersons || []).filter(p => p.email);
           if (ps.length) contactPersonId = (ps.find(p => p.isPrimary) || ps[0]).id;
         } catch (e) {}
         contactPersonId = contactPersonId || it.contactPersonId;
-        if (!contactPersonId) { results.push({ contactId: it.contactId, skipped: "no-recipient" }); continue; }
+        if (!contactPersonId) { results.push({ contactId, skipped: "no-recipient" }); continue; }
 
         const payload = {
           organizationId: env.BILLY_ORG_ID,
-          contactId: it.contactId,
+          contactId,
           contactPersonId,
           flatFee: it.flatFee || 0, percentageFee: 0, feeCurrencyId: "DKK",
           sendEmail: it.sendEmail !== false,
@@ -205,15 +210,15 @@ export default {
               billyError = attrs.length ? attrs.join("; ") : (e.errorMessage || (t || "").slice(0, 160));
             } catch { billyError = (t || "").slice(0, 160); }
           }
-          results.push({ contactId: it.contactId, status: r.status, ok: r.ok, sent: invoiceIds.length, mode: liveEnabled ? "live" : "test", ...(billyError ? { billyError } : {}) });
+          results.push({ contactId, status: r.status, ok: r.ok, sent: invoiceIds.length, mode: liveEnabled ? "live" : "test", ...(billyError ? { billyError } : {}) });
           if (r.ok) {
             // The invoiceIds here are the whole point: this log is the system of record for
             // per-invoice cadence, since Billy will never hand these back to us on read.
             const log = (await env.RYKKER.get("sent", "json")) || [];
-            log.unshift({ contactId: it.contactId, invoiceIds, step: it.step, fee: it.flatFee || 0, ts: Date.now() });
+            log.unshift({ contactId, invoiceIds, step: it.step, fee: it.flatFee || 0, ts: Date.now() });
             await env.RYKKER.put("sent", JSON.stringify(log.slice(0, 1000)));
           }
-        } catch (e) { results.push({ contactId: it.contactId, error: String(e).slice(0, 120) }); }
+        } catch (e) { results.push({ contactId, error: String(e).slice(0, 120) }); }
       }
       return j({ results }, 200, cors);
     }
