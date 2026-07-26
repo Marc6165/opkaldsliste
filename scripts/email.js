@@ -43,9 +43,10 @@ function buildEmail(step, items, cname, flatFee) {
   const cta = `Tryk på den blå knap "Vis rykker og fakturaer" nederst i mailen for at se ${one ? "fakturaen" : "fakturaerne"} og betale.`;
   const closing = `Har du allerede betalt, kan du se bort fra beskeden. Hvis noget ikke stemmer, kan du svare direkte på denne mail.`;
 
-  // the one escalating consequence line for this step
+  // the one escalating consequence line for this step. Step 0 (påmindelse) has none: the
+  // first touch stays pure goodwill; consequences start at the first actual rykker.
   let consequence;
-  if (step === 0) consequence = `Betaler du inden ${GAP_DAYS} dage, undgår du et rykkergebyr.`;
+  if (step === 0) consequence = "";
   else if (step === 1) consequence = `Betaler du ikke, sender vi endnu en rykker med et nyt gebyr.`;
   else if (step === 2) consequence = `Betaler du ikke, sender vi en sidste rykker, hvorefter sagen kan gå til inkasso.`;
   else {
@@ -61,11 +62,13 @@ function buildEmail(step, items, cname, flatFee) {
 
   if (one) {
     const iv = items[0], addr = svcAddr(iv, cname);
+    const addrEnd = addr.replace(/\.\s*$/, "");   // trim a trailing "." (e.g. "st.tv.") so a following ". " doesn't double up
     let open;
     if (step === 0) open = `Betalingsfristen på faktura ${iv.invoiceNo} for vinduespudsning på ${addr} er overskredet, og vi kan endnu ikke se din betaling. Det kan selvfølgelig være en forglemmelse.`;
-    else if (step === 3) open = `Dette er sidste rykker på faktura ${iv.invoiceNo} for vinduespudsning på ${addr}. Vi har tilføjet et rykkergebyr på ${flatFee} kr.`;
-    else open = `Vi mangler fortsat betaling på faktura ${iv.invoiceNo} for vinduespudsning på ${addr}. ${feeLine}`;
-    return { subject: `${title}: Faktura ${iv.invoiceNo} på ${dk(rest)} kr.`, body: `Hej,\n${open}\n${cta}\n${consequence}\n${closing}`, message, total };
+    else if (step === 3) open = `Dette er sidste rykker på faktura ${iv.invoiceNo} for vinduespudsning på ${addrEnd}. Vi har tilføjet et rykkergebyr på ${flatFee} kr.`;
+    else open = `Vi mangler fortsat betaling på faktura ${iv.invoiceNo} for vinduespudsning på ${addrEnd}. ${feeLine}`;
+    const body = ["Hej,", open, cta, consequence, closing].filter(Boolean).join("\n");   // drop empty step-0 consequence
+    return { subject: `${title}: Faktura ${iv.invoiceNo} på ${dk(rest)} kr.`, body, message, total };
   }
 
   const list = items.map(iv => `• Faktura ${iv.invoiceNo} – ${svcAddr(iv, cname)} – ${dk(iv.balance)} kr.`).join("\n");
@@ -73,7 +76,8 @@ function buildEmail(step, items, cname, flatFee) {
   if (step === 0) intro = `Vi kan endnu ikke se din betaling for følgende fakturaer for vinduespudsning:`;
   else if (step === 3) intro = `Dette er sidste rykker for følgende fakturaer for vinduespudsning. Vi har tilføjet et rykkergebyr på ${flatFee} kr.`;
   else intro = `Vi mangler fortsat betaling for følgende fakturaer for vinduespudsning. ${feeLine}`;
-  return { subject: `${title}: ${items.length} fakturaer på ${dk(rest)} kr.`, body: `Hej,\n${intro}\n${list}\n${cta}\n${consequence}\n${closing}`, message, total };
+  const body = ["Hej,", intro, list, cta, consequence, closing].filter(Boolean).join("\n");   // drop empty step-0 consequence
+  return { subject: `${title}: ${items.length} fakturaer på ${dk(rest)} kr.`, body, message, total };
 }
 
 module.exports = { dk, nbsp, svcAddr, buildEmail, GAP_DAYS };
