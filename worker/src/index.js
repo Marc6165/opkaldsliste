@@ -37,8 +37,11 @@ export function planSend(it, invHolds) {
   const lines = all.filter((l) => !invHolds[l.id]);
   if (!lines.length) return null;
   const invoiceIds = lines.map((l) => l.id);
-  // nothing held (or an old page that never shipped `lines`): keep the previewed text
-  if (lines.length === all.length || !it.lines)
+  // Rebuild the mail fresh whenever we have the invoice lines: it reflects any held
+  // invoices AND recomputes the Rykker 3 inkassovarsel deadline from the actual send date,
+  // not the up-to-a-week-old weekly preview (a stale deadline could give under 10 days'
+  // notice). Only an old cached page that never shipped `lines` falls back to previewed text.
+  if (!it.lines)
     return { invoiceIds, subject: it.subject, body: it.body, message: it.message };
   const em = buildEmail(it.step, lines, it.cname || it.name, it.flatFee || 0);
   return { invoiceIds, subject: em.subject, body: em.body, message: em.message };
