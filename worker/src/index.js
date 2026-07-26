@@ -8,7 +8,8 @@
  *   Secrets:       BILLY_TOKEN, APP_SECRET, SMS_WEBHOOK_TOKEN
  */
 import shared from "../../scripts/email.js";
-const { buildEmail } = shared;
+const { buildEmail, GAP_DAYS } = shared;
+const COOLDOWN_MS = GAP_DAYS * 86400000;   // an invoice can't be reminded again within this
 
 const j = (o, s = 200, cors) =>
   new Response(JSON.stringify(o), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
@@ -153,6 +154,12 @@ export default {
       const { items } = await req.json();
       const holds = await getHolds(env);
       const invHolds = await getInvHolds(env);
+      // an invoice reminded within the last GAP_DAYS must not be reminded again — a second
+      // reminder is a second email and a second 50 kr fee. Build that set once from the log.
+      const sentLog = (await env.RYKKER.get("sent", "json")) || [];
+      const now = Date.now();
+      const recentInv = {};
+      for (const s of sentLog) if (now - s.ts < COOLDOWN_MS) for (const id of (s.invoiceIds || [])) recentInv[id] = true;
       const liveEnabled = env.LIVE === "1";      // master switch — off until validated
       const results = [];
       for (const it of items || []) {
@@ -165,8 +172,16 @@ export default {
         // safety: while LIVE is off, only the test contact may receive anything
         if (!liveEnabled && contactId !== env.TEST_CONTACT) { results.push({ contactId, skipped: "live-off" }); continue; }
 
-        const plan = planSend(it, invHolds);
-        if (!plan) { results.push({ contactId, skipped: "held" }); continue; }
+        // exclude held invoices AND ones still inside their cooldown; planSend rebuilds the
+        // mail from whatever survives, so a stale tab that re-fires can't double-send.
+        const all = it.lines || (it.invoiceIds || []).map((id) => ({ id }));
+        const blocked = {};
+        for (const l of all) if (invHolds[l.id] || recentInv[l.id]) blocked[l.id] = true;
+        const plan = planSend(it, blocked);
+        if (!plan) {
+          results.push({ contactId, skipped: all.some((l) => recentInv[l.id]) ? "allerede-sendt" : "held" });
+          continue;
+        }
         const { invoiceIds, subject, body, message } = plan;
 
         // Billy 422s a reminder without a contactPersonId ("required field") and won't use a

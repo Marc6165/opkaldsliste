@@ -194,6 +194,8 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
 .ry-inv{display:flex;align-items:center;gap:8px}
 .ry-invtxt{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 .ry-inv.inv-held .ry-invtxt{text-decoration:line-through;opacity:.6}
+.ry-inv.inv-sent .ry-invtxt{text-decoration:line-through;opacity:.5}
+.ry-inv.inv-sent .ry-invtxt::after{content:" · sendt ✓";text-decoration:none;color:var(--muted)}
 .ry-noemail{font-size:12px;font-weight:600;color:var(--warn);background:var(--warn-bg);border-radius:8px;padding:6px 11px}
 .ry-stat{font-size:11.5px;color:var(--muted);min-height:14px}
 .ry-row.ry-done{opacity:.5}
@@ -433,13 +435,16 @@ function initApp(data){
       const invEls=[...row.querySelectorAll(".ry-inv")];
       // reflect how much of this rykker is left once invoices are hidden
       const sync=()=>{
-        const left=invEls.filter(el=>!el.classList.contains("inv-held"));
+        // an invoice won't go out if it's hidden (Skjul) or already sent within its cooldown
+        const left=invEls.filter(el=>!el.classList.contains("inv-held") && !el.classList.contains("inv-sent"));
         const allGone=invEls.length && !left.length;
-        row.classList.toggle("ry-held", allGone);
         if(sendBtn) sendBtn.disabled=allGone;
-        if(!row.classList.contains("ry-done"))
-          stat.textContent = allGone ? "alle fakturaer skjult"
+        if(!row.classList.contains("ry-done")){
+          const anySent=invEls.some(el=>el.classList.contains("inv-sent"));
+          row.classList.toggle("ry-held", allGone && !anySent);
+          stat.textContent = allGone ? (anySent?"allerede sendt":"alle fakturaer skjult")
                            : left.length<invEls.length ? `sender ${left.length} af ${invEls.length}` : "";
+        }
       };
       sendBtn&&sendBtn.addEventListener("click",async()=>{
         if(!W){ stat.textContent="ingen backend"; return; }
@@ -451,6 +456,7 @@ function initApp(data){
           else if(res.skipped==="live-off"){ stat.textContent="LIVE fra – intet sendt"; }
           else if(res.skipped==="held"){ stat.textContent="på hold"; }
           else if(res.skipped==="no-recipient"){ stat.textContent="ingen e-mail-modtager i Billy"; }
+          else if(res.skipped==="allerede-sendt"){ stat.textContent="allerede sendt – ingen ny rykker"; row.classList.add("ry-done"); }
           else{ stat.textContent = res.billyError ? ("fejl: "+res.billyError).slice(0,90) : ("fejl ("+(res.status||res.error||"?")+")"); }
         }catch(e){ stat.textContent="netværksfejl"; }
       });
@@ -471,10 +477,23 @@ function initApp(data){
     });
     if(W) fetch(W+"/state",{headers:{"Authorization":"Bearer "+SEC}}).then(r=>r.json()).then(d=>{
       const holds=d.holds||{}, invHolds=d.invHolds||{};
+      // invoices reminded within the cooldown — mark them here too, so a reload no longer
+      // shows a just-sent rykker as fresh (the list snapshot doesn't know about sends)
+      const sent=d.sent||[], now=Date.now(), COOL=10*86400000, recent={};
+      sent.forEach(s=>{ if(now-s.ts<COOL)(s.invoiceIds||[]).forEach(x=>recent[x]=true); });
       flat.forEach(({id,it,sync})=>{
         const row=document.getElementById(id); if(!row) return;
-        row.querySelectorAll(".ry-inv").forEach(el=>{ if(invHolds[el.dataset.inv]){
-          el.classList.add("inv-held"); el.querySelector(".inv-hold").textContent="Vis"; } });
+        const invEls=[...row.querySelectorAll(".ry-inv")];
+        invEls.forEach(el=>{
+          if(invHolds[el.dataset.inv]){ el.classList.add("inv-held"); el.querySelector(".inv-hold").textContent="Vis"; }
+          else if(recent[el.dataset.inv]){ el.classList.add("inv-sent"); const b=el.querySelector(".inv-hold"); if(b) b.style.display="none"; }
+        });
+        // whole rykker already sent within the cooldown -> dim it and lock Send
+        if(invEls.length && invEls.every(el=>el.classList.contains("inv-sent"))){
+          row.classList.add("ry-done");
+          const b=row.querySelector(".send"); if(b) b.disabled=true;
+          row.querySelector(".ry-stat").textContent="allerede sendt";
+        }
         sync&&sync();
         // a customer-level hold (they replied to a rykker) still silences everything
         if(holds[it.cid]){ row.classList.add("ry-held");

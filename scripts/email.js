@@ -76,4 +76,4 @@ function buildEmail(step, items, cname, flatFee) {
   return { subject: `${title}: ${items.length} fakturaer på ${dk(rest)} kr.`, body: `Hej,\n${intro}\n${list}\n${cta}\n${consequence}\n${closing}`, message, total };
 }
 
-module.exports = { dk, nbsp, svcAddr, buildEmail };
+module.exports = { dk, nbsp, svcAddr, buildEmail, GAP_DAYS };
