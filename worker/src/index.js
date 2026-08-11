@@ -106,7 +106,33 @@ export default {
       const html = await req.text();
       if (!html || html.length < 1000) return j({ error: "empty or too small" }, 400, cors);
       await env.RYKKER.put("apphtml", html);
+      await env.RYKKER.put("pubts", String(Date.now()));   // publish marker the app polls after "Opdater fra Billy"
       return j({ ok: true, bytes: html.length }, 200, cors);
+    }
+
+    // trigger a fresh Billy rebuild from the app's "Opdater fra Billy" button: dispatch the
+    // GitHub Actions workflow, which reruns billy_refresh.js and re-POSTs the rebuilt index.html
+    // to /publish (bumping pubts). The app then polls /state's pubts and reloads once it changes.
+    // Needs GH_DISPATCH_TOKEN (a token with actions:write on the repo) — set via
+    // `wrangler secret put GH_DISPATCH_TOKEN`.
+    if (path === "/refresh" && req.method === "POST") {
+      if (!env.GH_DISPATCH_TOKEN) return j({ error: "no-gh-token" }, 500, cors);
+      const repo = env.GH_REPO || "Marc6165/opkaldsliste";
+      const wf = env.GH_WORKFLOW || "refresh.yml";
+      const r = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${wf}/dispatches`, {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + env.GH_DISPATCH_TOKEN,
+          "Accept": "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "sands-rykker",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ref: env.GH_BRANCH || "main" }),
+      });
+      if (r.status === 204) return j({ ok: true }, 200, cors);   // GitHub returns 204 on success
+      const t = await r.text().catch(() => "");
+      return j({ ok: false, status: r.status, error: t.slice(0, 200) }, 502, cors);
     }
 
     if (path === "/state") {
@@ -119,7 +145,8 @@ export default {
       // `sent` is the per-invoice dunning history the weekly refresh reads back to work
       // out each invoice's step — Billy cannot tell us which invoice a reminder was for.
       return j({ holds: heldOut, invHolds: await getInvHolds(env), inbox: inboxOut,
-                 sent: (await env.RYKKER.get("sent", "json")) || [] }, 200, cors);
+                 sent: (await env.RYKKER.get("sent", "json")) || [],
+                 pubts: Number(await env.RYKKER.get("pubts")) || 0 }, 200, cors);
     }
     if (path === "/hold" && req.method === "POST") {
       const { contactId, invoiceId, invoiceNo, name, reason } = await req.json();

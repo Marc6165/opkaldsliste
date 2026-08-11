@@ -11,8 +11,12 @@ id = "c142f79c9d264cde8dc1b971de87faa3"
 BILLY_ORG_ID = "QDuUgYK5SmyeKHHdSzyqCQ"
 APP_ORIGIN = "*"
 TEST_CONTACT = "dBrJuWxYRG28q95fScFkug"   # throwaway 'TEST – Marcus' contact (Marcussand2@gmail.com)
+GH_REPO = "Marc6165/opkaldsliste"         # repo whose refresh workflow the "Opdater fra Billy" button dispatches
+GH_WORKFLOW = "refresh.yml"               # workflow file to dispatch (workflow_dispatch)
+GH_BRANCH = "main"
 
 # Secrets (do NOT put here — set with `wrangler secret put` or in the dashboard):
 #   BILLY_TOKEN         your Billy API token
 #   APP_SECRET          shared secret the app sends as `Authorization: Bearer <APP_SECRET>`
 #   SMS_WEBHOOK_TOKEN   random token GatewayAPI includes in the webhook URL (?token=...)
+#   GH_DISPATCH_TOKEN   GitHub token with actions:write on GH_REPO — lets /refresh dispatch the rebuild workflow

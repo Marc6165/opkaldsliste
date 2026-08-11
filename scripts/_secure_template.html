@@ -47,7 +47,12 @@ button,a,input,label,.act,.done,.big-btn{touch-action:manipulation}
 .locknote{color:var(--muted);font-size:12px;margin-top:14px;line-height:1.5}
 
 .mast{margin-bottom:6px}
+.masttop{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .eyebrow{font-size:12px;color:var(--muted);font-weight:600}
+.upd{border:1px solid var(--hair);background:var(--card);color:var(--muted);border-radius:10px;
+  padding:7px 12px;font-size:13px;font-weight:600;cursor:pointer;min-height:34px;white-space:nowrap}
+.upd:hover:not(:disabled){color:var(--blue);border-color:var(--blue)}
+.upd:disabled{opacity:.6;cursor:default}
 .mast h1{font-weight:700;font-size:clamp(23px,6vw,30px);margin:4px 0 10px;line-height:1.15;
   letter-spacing:-.02em;text-wrap:balance}
 .mast p{margin:0;color:var(--muted);font-size:14.5px;line-height:1.55;max-width:52ch}
@@ -224,7 +229,10 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
 
 <div class="wrap" id="app" hidden>
   <header class="mast">
-    <div class="eyebrow">Sands Vinduespudsning</div>
+    <div class="masttop">
+      <div class="eyebrow">Sands Vinduespudsning</div>
+      <button class="upd no-print" id="updbtn" type="button" title="Hent de nyeste tal fra Billy">↻&nbsp;Opdater</button>
+    </div>
     <h1 id="pageTitle">Ring til kunderne</h1>
   </header>
 
@@ -396,6 +404,44 @@ function initApp(data){
       openSheet();
     });
   });
+
+  // ---- "Opdater fra Billy": dispatch the GitHub rebuild, wait for the republish, reload ----
+  (function(){
+    const updbtn=document.getElementById("updbtn"); if(!updbtn) return;
+    const W=data.workerUrl, SEC=data.appSecret, H={"Authorization":"Bearer "+SEC};
+    if(!W){ updbtn.disabled=true; updbtn.title="Backend ikke forbundet"; return; }
+    const label="↻ Opdater";
+    updbtn.addEventListener("click",async()=>{
+      if(updbtn.dataset.busy) return;
+      if(!confirm("Hent de nyeste tal fra Billy nu?\n\nDet tager ca. 1–2 minutter. Siden genindlæser sig selv, når de nye tal er klar."))return;
+      updbtn.dataset.busy="1"; updbtn.disabled=true; updbtn.textContent="↻ Opdaterer…";
+      let pubts0=0;
+      try{ const s=await fetch(W+"/state",{headers:H,cache:"no-store"}).then(r=>r.json()); pubts0=s.pubts||0; }catch(e){}
+      try{
+        const r=await fetch(W+"/refresh",{method:"POST",headers:H});
+        const d=await r.json().catch(()=>({}));
+        if(!r.ok||!d.ok) throw new Error(d.error||("HTTP "+r.status));
+      }catch(e){
+        updbtn.textContent=label; updbtn.disabled=false; delete updbtn.dataset.busy;
+        toast("Kunne ikke starte opdatering"); return;
+      }
+      toast("Opdatering sat i gang…");
+      // poll for the republish (pubts bumps when the Action re-publishes), then reload
+      const started=Date.now(), MAXMS=6*60000;
+      const tick=async()=>{
+        try{
+          const s=await fetch(W+"/state",{headers:H,cache:"no-store"}).then(r=>r.json());
+          if((s.pubts||0)>pubts0){ updbtn.textContent="↻ Færdig"; setTimeout(()=>location.reload(),700); return; }
+        }catch(e){}
+        if(Date.now()-started>MAXMS){
+          updbtn.textContent=label; updbtn.disabled=false; delete updbtn.dataset.busy;
+          toast("Tager længere end forventet – genindlæs siden om lidt"); return;
+        }
+        setTimeout(tick,5000);
+      };
+      setTimeout(tick,15000);   // give the Action time to spin up before the first check
+    });
+  })();
 
   // ---- Rykkere tab: interactive Approve/Hold wired to the Worker ----
   function renderRykker(data){
