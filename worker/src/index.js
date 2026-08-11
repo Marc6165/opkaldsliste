@@ -23,6 +23,11 @@ async function putHolds(env, h) { await env.RYKKER.put("holds", JSON.stringify(h
 async function getInvHolds(env) { return (await env.RYKKER.get("invholds", "json")) || {}; }
 async function putInvHolds(env, h) { await env.RYKKER.put("invholds", JSON.stringify(h)); }
 
+// Case notes on held customers, keyed by contactId: a free-text note + a status the operator
+// sets (afventer_os / aftale / tvist), so "what's going on with this hold" survives across
+// sessions. Distinct from the hold itself (which only silences reminders).
+async function getCases(env) { return (await env.RYKKER.get("cases", "json")) || {}; }
+
 async function hold(env, contactId, reason, meta) {
   const h = await getHolds(env);
   h[contactId] = { reason: reason || "manual", ts: Date.now(), ...(meta || {}) };
@@ -145,7 +150,7 @@ export default {
       // `sent` is the per-invoice dunning history the weekly refresh reads back to work
       // out each invoice's step — Billy cannot tell us which invoice a reminder was for.
       return j({ holds: heldOut, invHolds: await getInvHolds(env), inbox: inboxOut,
-                 sent: (await env.RYKKER.get("sent", "json")) || [],
+                 sent: (await env.RYKKER.get("sent", "json")) || [], cases: await getCases(env),
                  pubts: Number(await env.RYKKER.get("pubts")) || 0 }, 200, cors);
     }
     if (path === "/hold" && req.method === "POST") {
@@ -167,6 +172,19 @@ export default {
       }
       const h = await getHolds(env); delete h[contactId]; await putHolds(env, h);
       return j({ ok: true, holds: h }, 200, cors);
+    }
+    // set/update a case note + status on a held customer (Hold tab). Merge-updates only the
+    // fields sent, so a note save doesn't clobber the status and vice-versa.
+    if (path === "/case" && req.method === "POST") {
+      const { contactId, status, note } = await req.json();
+      if (!contactId) return j({ error: "contactId required" }, 400, cors);
+      const cases = await getCases(env);
+      const c = cases[contactId] || {};
+      if (status !== undefined) { c.status = status; c.statusTs = Date.now(); }
+      if (note !== undefined) { c.note = String(note).slice(0, 1000); c.noteTs = Date.now(); }
+      cases[contactId] = c;
+      await env.RYKKER.put("cases", JSON.stringify(cases));
+      return j({ ok: true, case: c }, 200, cors);
     }
     // sync phone->contact and email->contact maps (posted by the daily Action) for reply matching
     if (path === "/maps" && req.method === "POST") {

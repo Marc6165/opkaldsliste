@@ -206,6 +206,31 @@ footer{margin-top:28px;font-size:12px;color:var(--muted);text-align:center;line-
 .ry-row.ry-done{opacity:.5}
 .ry-row.ry-held{opacity:.6}
 .ry-row.ry-held .ry-name{text-decoration:line-through}
+/* Hold-tab case cards */
+.hcard{border:1px solid var(--hair);border-radius:14px;padding:14px;margin-bottom:12px;background:var(--card)}
+.hcard-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.hc-who{min-width:0}
+.hc-meta{display:block;font-size:12.5px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
+.hbadge{flex:none;font-size:11.5px;font-weight:700;padding:4px 9px;border-radius:99px;white-space:nowrap;
+  border:1px solid var(--hair);color:var(--muted);background:var(--bg)}
+.hbadge.st-us{color:#8a5a00;background:#FFF4E0;border-color:#F3D9A8}
+.hbadge.st-deal{color:var(--blue-d);background:var(--blue-bg);border-color:#CBD9FF}
+.hbadge.st-disp{color:var(--red);background:var(--red-bg);border-color:#F5C6C2}
+.htl{margin:12px 0 2px;border-left:2px solid var(--hair);padding-left:2px}
+.htl-ev{position:relative;padding:4px 0 4px 14px;font-size:13px}
+.htl-ev::before{content:"";position:absolute;left:-5px;top:9px;width:8px;height:8px;border-radius:99px;background:var(--muted)}
+.htl-ev.reply::before{background:var(--blue)}
+.htl-d{color:var(--muted);font-size:11.5px;font-weight:600;margin-right:8px;font-variant-numeric:tabular-nums}
+.htl-x{color:var(--ink)}
+.htl-q{margin-top:4px;color:var(--ink);background:var(--bg);border-radius:8px;padding:7px 9px;font-size:13px;
+  line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.htl-empty{font-size:12.5px;color:var(--muted);padding:6px 2px}
+.hc-controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.hstatus{flex:none;border:1px solid var(--hair);border-radius:8px;padding:7px 9px;font-size:12.5px;
+  font-weight:600;color:var(--ink);background:var(--card);min-height:36px}
+.hnote{flex:1;min-width:180px;border:1px solid var(--hair);border-radius:8px;padding:8px 10px;
+  font:inherit;font-size:13px;line-height:1.4;resize:vertical;color:var(--ink);background:var(--card)}
+.hc-actions{display:flex;align-items:center;gap:8px;margin-top:10px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -555,18 +580,55 @@ function initApp(data){
     if(!W){ box.innerHTML='<p class="intro">Backend ikke forbundet.</p>'; return; }
     box.innerHTML='<p class="intro">Henter…</p>';
     const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-    const reasonLbl={"manuelt hold":"Sat på hold manuelt","manual":"Sat på hold manuelt","sms-svar":"Svarede på SMS","email-svar":"Svarede på e-mail"};
-    const dt=ts=>{ try{const d=new Date(ts);return d.toLocaleDateString("da-DK",{day:"2-digit",month:"2-digit"})+" "+d.toLocaleTimeString("da-DK",{hour:"2-digit",minute:"2-digit"});}catch(e){return "";} };
+    const reasonLbl={"manuelt hold":"sat på hold manuelt","manual":"sat på hold manuelt","sms-svar":"svarede på SMS","email-svar":"svarede på e-mail"};
+    const dkf=x=>Number(x||0).toLocaleString("da-DK",{minimumFractionDigits:2,maximumFractionDigits:2});
+    const dt=ts=>{ try{return new Date(ts).toLocaleDateString("da-DK",{day:"2-digit",month:"short"});}catch(e){return "";} };
+    const dtFull=ts=>{ try{const d=new Date(ts);return d.toLocaleDateString("da-DK",{day:"2-digit",month:"2-digit"})+" "+d.toLocaleTimeString("da-DK",{hour:"2-digit",minute:"2-digit"});}catch(e){return "";} };
+    const ageTxt=ts=>{ const n=Math.max(0,Math.floor((Date.now()-ts)/86400000)); return n===0?"i dag":n===1?"1 dag":n+" dage"; };
+    const STAT={ "":{lbl:"Ny",cls:"st-new"}, afventer_os:{lbl:"Afventer os",cls:"st-us"}, aftale:{lbl:"Aftale indgået",cls:"st-deal"}, tvist:{lbl:"Tvist",cls:"st-disp"} };
+    const STAT_ORDER=["","afventer_os","aftale","tvist"];
+    const stepLbl=s=> s===0?"Påmindelse sendt":("Rykker "+s+" sendt");
     fetch(W+"/state",{headers:{"Authorization":"Bearer "+SEC}}).then(r=>r.json()).then(d=>{
       const holds=d.holds||{}, inbox=d.inbox||[], cids=Object.keys(holds);
-      const invHolds=d.invHolds||{}, invIds=Object.keys(invHolds);
-      let html=`<div class="ry-note">Kunder på hold får <b>ingen rykkere</b>, før du frigiver dem. Svar på SMS/e-mail sætter automatisk kunden på hold. Skjulte fakturaer springes over — kunden rykkes stadig for sine øvrige.</div>`;
+      const invHolds=d.invHolds||{}, invIds=Object.keys(invHolds), cases=d.cases||{};
+      // amount owed per customer, from the rykker snapshot
+      const owed={};
+      (data.rykkerItems||[]).forEach(it=>{ const cid=it.cid; if(!cid)return;
+        (owed[cid]=owed[cid]||{total:0,invs:new Set()});
+        owed[cid].total+=Number(it.total)||0; (it.invoiceIds||[]).forEach(x=>owed[cid].invs.add(x)); });
+      // activity per customer: reminders sent + replies received, oldest first
+      const evs={};
+      (d.sent||[]).forEach(s=>{ if(!s.contactId)return; (evs[s.contactId]=evs[s.contactId]||[]).push({t:"sent",ts:s.ts,step:s.step,fee:s.fee}); });
+      inbox.forEach(m=>{ if(m.contactId){ (evs[m.contactId]=evs[m.contactId]||[]).push({t:"reply",ts:m.ts,ch:m.ch,text:m.text||m.subject||""}); } });
+      Object.values(evs).forEach(a=>a.sort((x,y)=>x.ts-y.ts));
+      const curStatus=cid=>{ const c=cases[cid]||{}; if(c.status!==undefined)return c.status;
+        const r=(holds[cid]||{}).reason; return (r==="sms-svar"||r==="email-svar")?"afventer_os":""; };
+
+      let html=`<div class="ry-note">Kunder på hold får <b>ingen rykkere</b>, før du frigiver dem. Svar på SMS/e-mail sætter automatisk kunden på hold. Sæt en <b>status</b> og skriv en <b>note</b> for at holde styr på hvad der er aftalt.</div>`;
       html+=`<div class="ry-sec"><div class="ry-h">Kunder på hold <span class="ry-n">${cids.length}</span></div>`;
       if(!cids.length) html+='<p class="intro" style="margin:8px 2px">Ingen kunder på hold. 👍</p>';
-      cids.forEach(cid=>{ const h=holds[cid];
-        html+=`<div class="ry-row" data-cid="${esc(cid)}"><div class="ry-who"><span class="ry-name">${esc(h.name||cid)}</span>`
-          +`<span class="ry-sub">${esc(reasonLbl[h.reason]||h.reason||"hold")} · ${dt(h.ts)}${h.text?' · «'+esc(String(h.text).slice(0,70))+'»':''}</span></div>`
-          +`<div class="ry-right"><button class="ry-btn hold-rel">Frigiv</button><span class="ry-stat"></span></div></div>`;
+      cids.sort((a,b)=>(holds[b].ts||0)-(holds[a].ts||0)).forEach(cid=>{
+        const h=holds[cid], st=curStatus(cid), sc=STAT[st]||STAT[""], c=cases[cid]||{};
+        const o=owed[cid], meta=[];
+        if(o){ meta.push(dkf(o.total)+" kr"); meta.push(o.invs.size+(o.invs.size===1?" faktura":" fakturaer")); }
+        meta.push("på hold i "+ageTxt(h.ts));
+        meta.push(reasonLbl[h.reason]||h.reason||"hold");
+        const list=evs[cid]||[]; let tl="";
+        if(list.length) list.forEach(e=>{
+          if(e.t==="sent") tl+=`<div class="htl-ev"><span class="htl-d">${dt(e.ts)}</span><span class="htl-x">${stepLbl(e.step)}${e.fee?` · ${e.fee} kr gebyr`:""}</span></div>`;
+          else tl+=`<div class="htl-ev reply"><span class="htl-d">${dt(e.ts)}</span><span class="htl-x">${e.ch==="sms"?"📱":"✉️"} Kunden svarede:<div class="htl-q">${esc(e.text)}</div></span></div>`;
+        });
+        else tl=`<div class="htl-empty">Ingen rykkere eller svar registreret endnu.</div>`;
+        const opts=STAT_ORDER.map(v=>`<option value="${v}"${v===st?" selected":""}>${STAT[v].lbl}</option>`).join("");
+        html+=`<div class="hcard" data-cid="${esc(cid)}">`
+          +`<div class="hcard-top"><div class="hc-who"><span class="ry-name">${esc(h.name||cid)}</span>`
+          +`<span class="hc-meta">${meta.map(esc).join(" · ")}</span></div>`
+          +`<span class="hbadge ${sc.cls}">${esc(sc.lbl)}</span></div>`
+          +`<div class="htl">${tl}</div>`
+          +`<div class="hc-controls"><select class="hstatus" aria-label="Status">${opts}</select>`
+          +`<textarea class="hnote" rows="2" placeholder="Note – fx «ringet 6/7, betaler fredag»">${esc(c.note||"")}</textarea></div>`
+          +`<div class="hc-actions"><button class="ry-btn hnote-save">Gem note</button>`
+          +`<button class="ry-btn hold-rel">Frigiv</button><span class="ry-stat"></span></div></div>`;
       });
       html+=`</div>`;
       // hidden invoices live here too — otherwise a Skjul made on the Rykkere tab is only
@@ -575,24 +637,42 @@ function initApp(data){
       if(!invIds.length) html+='<p class="intro" style="margin:8px 2px">Ingen skjulte fakturaer.</p>';
       invIds.forEach(id=>{ const h=invHolds[id];
         html+=`<div class="ry-row" data-inv="${esc(id)}"><div class="ry-who"><span class="ry-name">${esc(h.name||"(ukendt kunde)")}</span>`
-          +`<span class="ry-sub">Faktura #${esc(h.invoiceNo||"?")} · ${esc(reasonLbl[h.reason]||h.reason||"skjult")} · ${dt(h.ts)}</span></div>`
+          +`<span class="ry-sub">Faktura #${esc(h.invoiceNo||"?")} · ${esc(reasonLbl[h.reason]||h.reason||"skjult")} · ${dtFull(h.ts)}</span></div>`
           +`<div class="ry-right"><button class="ry-btn hold-rel">Vis igen</button><span class="ry-stat"></span></div></div>`;
       });
       html+=`</div>`;
-      if(inbox.length){
-        html+=`<div class="ry-sec"><div class="ry-h">Seneste svar <span class="ry-n">${inbox.length}</span></div>`;
-        inbox.forEach(m=>{ html+=`<div class="ry-row"><div class="ry-who"><span class="ry-name">${esc(m.name||m.from||m.msisdn||"?")}</span>`
-          +`<span class="ry-sub">${m.ch==="sms"?"📱 SMS":"✉️ E-mail"} · ${dt(m.ts)}${m.contactId?"":" · (ikke matchet)"}<br>${esc(String(m.text||m.subject||"").slice(0,100))}</span></div></div>`; });
+      // replies we couldn't match to a customer — worth a manual look
+      const unmatched=inbox.filter(m=>!m.contactId);
+      if(unmatched.length){
+        html+=`<div class="ry-sec"><div class="ry-h">Svar uden match <span class="ry-n">${unmatched.length}</span></div>`;
+        html+=`<p class="intro" style="margin:6px 2px 8px">Kunne ikke kobles til en kunde automatisk.</p>`;
+        unmatched.forEach(m=>{ html+=`<div class="ry-row"><div class="ry-who"><span class="ry-name">${esc(m.from||m.msisdn||"?")}</span>`
+          +`<span class="ry-sub">${m.ch==="sms"?"📱 SMS":"✉️ E-mail"} · ${dtFull(m.ts)}<br>${esc(String(m.text||m.subject||"").slice(0,140))}</span></div></div>`; });
         html+=`</div>`;
       }
       box.innerHTML=html;
-      box.querySelectorAll(".ry-row[data-cid],.ry-row[data-inv]").forEach(row=>{
-        const btn=row.querySelector(".hold-rel"), stat=row.querySelector(".ry-stat");
-        const body=row.dataset.inv?{invoiceId:row.dataset.inv}:{contactId:row.dataset.cid};
-        btn&&btn.addEventListener("click",async()=>{ stat.textContent="…";
+
+      // Frigiv / Vis igen (customer cards + hidden-invoice rows)
+      box.querySelectorAll("[data-cid],[data-inv]").forEach(el=>{
+        const rel=el.querySelector(".hold-rel"), stat=el.querySelector(".ry-stat");
+        const body=el.dataset.inv?{invoiceId:el.dataset.inv}:{contactId:el.dataset.cid};
+        rel&&rel.addEventListener("click",async()=>{ stat.textContent="…";
           try{ await fetch(W+"/release",{method:"POST",headers:{"Authorization":"Bearer "+SEC,"Content-Type":"application/json"},body:JSON.stringify(body)});
-            row.style.opacity=".4"; btn.disabled=true; stat.textContent="frigivet ✓";
+            el.style.opacity=".4"; el.querySelectorAll("button,select,textarea").forEach(x=>x.disabled=true); stat.textContent="frigivet ✓";
           }catch(e){ stat.textContent="fejl"; } });
+      });
+      // save status + note per customer card
+      box.querySelectorAll(".hcard").forEach(card=>{
+        const cid=card.dataset.cid, stat=card.querySelector(".ry-stat");
+        const save=body=>fetch(W+"/case",{method:"POST",headers:{"Authorization":"Bearer "+SEC,"Content-Type":"application/json"},body:JSON.stringify(Object.assign({contactId:cid},body))});
+        const sel=card.querySelector(".hstatus"), badge=card.querySelector(".hbadge");
+        sel&&sel.addEventListener("change",async()=>{ stat.textContent="…";
+          try{ await save({status:sel.value}); const sc=STAT[sel.value]||STAT[""];
+            badge.className="hbadge "+sc.cls; badge.textContent=sc.lbl; stat.textContent="gemt ✓";
+          }catch(e){ stat.textContent="fejl"; } });
+        const nb=card.querySelector(".hnote-save"), ta=card.querySelector(".hnote");
+        nb&&nb.addEventListener("click",async()=>{ stat.textContent="…";
+          try{ await save({note:ta.value}); stat.textContent="note gemt ✓"; }catch(e){ stat.textContent="fejl"; } });
       });
     }).catch(()=>{ box.innerHTML='<p class="intro">Kunne ikke hente hold.</p>'; });
   }
