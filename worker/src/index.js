@@ -28,6 +28,27 @@ async function putInvHolds(env, h) { await env.RYKKER.put("invholds", JSON.strin
 // sessions. Distinct from the hold itself (which only silences reminders).
 async function getCases(env) { return (await env.RYKKER.get("cases", "json")) || {}; }
 
+// Addresses that are never a customer reply. Billy/Shine mails every outgoing invoice from
+// documents.shine.co and the reply-mailbox gets its own copy; the Gmail script's
+// `subject:faktura` matches those, ~10 a day, which is enough to flush every real reply out
+// of the ring buffer (that is exactly what happened from 2026-08-26 on).
+const SELF_SENDERS = [
+  /@documents\.shine\.co$/i,                // Billy/Shine invoice mails
+  /@sandsvinduespuds/i,                     // our own site/WordPress notifications
+  /^sands\.vinduespudsning@gmail\.com$/i,   // the reply mailbox itself
+  /^noreply@email\.vippsmobilepay\.com$/i,  // MobilePay newsletters
+];
+const isSelfSender = (email) => !!email && SELF_SENDERS.some((re) => re.test(email));
+
+// Trim the inbox ring buffer, but never evict a reply we matched to a customer — those are
+// what the Hold tab's timelines are built from. Unmatched traffic ages out first.
+const INBOX_CAP = 200, MATCHED_KEEP = 100;
+function trimInbox(list) {
+  if (list.length <= INBOX_CAP) return list;
+  return list.slice(0, INBOX_CAP)
+    .concat(list.slice(INBOX_CAP).filter((x) => x.contactId).slice(0, MATCHED_KEEP));
+}
+
 async function hold(env, contactId, reason, meta) {
   const h = await getHolds(env);
   h[contactId] = { reason: reason || "manual", ts: Date.now(), ...(meta || {}) };
@@ -73,7 +94,7 @@ export default {
       const contactId = phonemap[msisdn];
       const inbox = (await env.RYKKER.get("inbox", "json")) || [];
       inbox.unshift({ ch: "sms", msisdn, text, contactId: contactId || null, ts: Date.now() });
-      await env.RYKKER.put("inbox", JSON.stringify(inbox.slice(0, 200)));
+      await env.RYKKER.put("inbox", JSON.stringify(trimInbox(inbox)));
       if (contactId) await hold(env, contactId, "sms-svar", { text, channel: "sms" });
       return j({ ok: true, matched: !!contactId }, 200, cors);
     }
@@ -84,11 +105,14 @@ export default {
       const b = await req.json().catch(() => ({}));
       const from = String(b.from || "");
       const email = (from.match(/[\w.+-]+@[\w.-]+/) || [""])[0].toLowerCase();
+      // Our own outgoing post is not a reply: drop it at the door so it can neither be stored
+      // nor crowd the inbox window the app reads.
+      if (isSelfSender(email)) return j({ ok: true, ignored: "self-sender" }, 200, cors);
       const emailmap = (await env.RYKKER.get("emailmap", "json")) || {};
       const contactId = emailmap[email];
       const inbox = (await env.RYKKER.get("inbox", "json")) || [];
       inbox.unshift({ ch: "email", from, email, subject: b.subject || "", text: (b.text || "").slice(0, 500), contactId: contactId || null, ts: Date.now() });
-      await env.RYKKER.put("inbox", JSON.stringify(inbox.slice(0, 200)));
+      await env.RYKKER.put("inbox", JSON.stringify(trimInbox(inbox)));
       if (contactId) await hold(env, contactId, "email-svar", { text: (b.text || "").slice(0, 300), from });
       return j({ ok: true, matched: !!contactId }, 200, cors);
     }
@@ -146,7 +170,10 @@ export default {
       const names = (await env.RYKKER.get("namemap", "json")) || {};
       const heldOut = {};
       for (const cid in holds) heldOut[cid] = { ...holds[cid], name: names[cid] || null };
-      const inboxOut = inbox.slice(0, 50).map(x => ({ ...x, name: x.contactId ? (names[x.contactId] || null) : null }));
+      // The app needs the newest traffic *and* every reply tied to a customer (the Hold cards'
+      // timelines). A plain slice lets unmatched noise cut the matched ones off, so union them in.
+      const inboxOut = inbox.filter((x, i) => i < 50 || x.contactId).slice(0, 150)
+        .map(x => ({ ...x, name: x.contactId ? (names[x.contactId] || null) : null }));
       // `sent` is the per-invoice dunning history the weekly refresh reads back to work
       // out each invoice's step — Billy cannot tell us which invoice a reminder was for.
       return j({ holds: heldOut, invHolds: await getInvHolds(env), inbox: inboxOut,

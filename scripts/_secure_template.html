@@ -600,6 +600,13 @@ function initApp(data){
       const evs={};
       (d.sent||[]).forEach(s=>{ if(!s.contactId)return; (evs[s.contactId]=evs[s.contactId]||[]).push({t:"sent",ts:s.ts,step:s.step,fee:s.fee}); });
       inbox.forEach(m=>{ if(m.contactId){ (evs[m.contactId]=evs[m.contactId]||[]).push({t:"reply",ts:m.ts,ch:m.ch,text:m.text||m.subject||""}); } });
+      // The reply that triggered a hold is also stored on the hold record itself. Fall back to
+      // it when it is no longer in the inbox window — the ring buffer ages out, and noise can
+      // push a reply out of it entirely, which would leave the card with no context at all.
+      cids.forEach(cid=>{ const h=holds[cid]; if(!h||!h.text)return;
+        const a=(evs[cid]=evs[cid]||[]);
+        if(a.some(e=>e.t==="reply"&&Math.abs(e.ts-h.ts)<120000))return;   // same reply, from the inbox
+        a.push({t:"reply",ts:h.ts,ch:h.channel||"email",text:h.text}); });
       Object.values(evs).forEach(a=>a.sort((x,y)=>x.ts-y.ts));
       const curStatus=cid=>{ const c=cases[cid]||{}; if(c.status!==undefined)return c.status;
         const r=(holds[cid]||{}).reason; return (r==="sms-svar"||r==="email-svar")?"afventer_os":""; };
